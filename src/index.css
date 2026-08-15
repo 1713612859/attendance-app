@@ -1,0 +1,91 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+html, body, #root {
+  height: 100%;
+}
+
+/* antd-mobile 主题变量对齐品牌绿，避免默认蓝色和我们的视觉体系打架 */
+:root {
+  --adm-color-primary: #16a34a;
+  --adm-color-success: #16a34a;
+  --adm-color-text: #1a2e22;
+  --adm-color-weak: #5f6e63;
+  --adm-color-border: #e2e8f0;
+  --adm-font-size-main: 15px;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  background: #f4f6f5;
+  color: #1a2e22;
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: #1a2e22;
+  background: #fff;
+}
+.input:focus {
+  outline: none;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* 底部弹层：遮罩淡入 + 面板上滑，统一的企业级面板动效 */
+@keyframes sheetBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheetUpIn {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-sheet-backdrop {
+  animation: sheetBackdropIn 0.22s ease-out both;
+}
+.animate-sheet-up {
+  animation: sheetUpIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 页面级内容进入动效：轻微上移淡入 */
+@keyframes pageFadeUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-page-in {
+  animation: pageFadeUp 0.32s ease-out both;
+}
+
+/* 卡片错落进入，用于列表/统计卡片 */
+@keyframes cardFadeUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-card-in {
+  animation: cardFadeUp 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
