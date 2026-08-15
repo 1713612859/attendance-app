@@ -61,6 +61,7 @@ npm run lint        # oxlint
 
 ## 相关文档
 
+- **[FEATURES.md](./FEATURES.md)** —— 完整功能列表，按模块整理
 - **[PACKAGING.md](./PACKAGING.md)** —— 打包/部署说明（PWA 部署 + 真实 APK 打包两条路线）
 - **[BUSINESS_LOGIC_REVIEW.md](./BUSINESS_LOGIC_REVIEW.md)** —— 业务逻辑现状与待审查清单，记录了考勤计算规则、跨模块联动逻辑、以及明确标注为"Demo 阶段简化"的部分，供后续开发/审查参考
 
