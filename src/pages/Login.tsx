@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, User2 } from "lucide-react";
+import { Globe, Lock, User2 } from "lucide-react";
 import { login } from "../lib/auth";
 import { PROFILE } from "../lib/mockApi";
 import { useI18n } from "../i18n";
@@ -35,8 +35,10 @@ export default function Login() {
 
       <button
         onClick={() => setLang(lang === "en" ? "zh" : "en")}
-        className="relative z-10 mt-4 self-end mr-4 rounded-full bg-white/12 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-white/20 active:bg-white/20"
+        aria-label={t("profile.language")}
+        className="relative z-10 mt-4 mr-4 flex items-center gap-1.5 self-end rounded-full bg-white/12 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-white/20 active:bg-white/20"
       >
+        <Globe size={14} />
         {lang === "en" ? "中文" : "EN"}
       </button>
 
@@ -44,7 +46,7 @@ export default function Login() {
         <div className="mx-auto w-full max-w-sm">
           <div className="mb-10 text-center text-white">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-3xl bg-white shadow-inner shadow-black/10 ring-1 ring-white/20">
-              <img src="/etech-logo.png" alt="" className="h-11 w-11 object-contain" />
+              <img src="/icon.svg" alt="" className="h-11 w-11 object-contain" />
             </div>
             <h1 className="text-lg font-semibold leading-snug tracking-tight">{t("common.appName")}</h1>
             <p className="mt-1 text-xs text-white/60">{t("common.appSubName")} · {t("login.subtitle")}</p>
@@ -93,13 +95,7 @@ export default function Login() {
             >
               {loading ? t("login.loggingIn") : t("login.loginButton")}
             </button>
-
-            <p className="text-center text-[11px] leading-relaxed text-slate-400">
-              {t("login.demoHint", { id: PROFILE.employeeId })}
-            </p>
           </form>
-
-          <p className="mt-6 text-center text-[11px] text-white/40">{t("login.footerNote")}</p>
         </div>
       </div>
     </div>

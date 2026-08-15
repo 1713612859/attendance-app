@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { Camera, CheckCircle2, LogIn, MapPin } from "lucide-react";
+import { Camera, CheckCircle2, Clock3, MapPin } from "lucide-react";
 import CameraCapture from "../components/CameraCapture";
 import PhotoPreview from "../components/PhotoPreview";
-import { PROFILE, fetchClockRecords, getEffectiveShiftSync, getTodaySessions, submitClock } from "../lib/mockApi";
-import type { ClockRecord, ClockSession } from "../types";
+import { PROFILE, fetchClockRecords, getEffectiveShiftSync, submitClock } from "../lib/mockApi";
+import type { ClockRecord, ClockSession, Shift } from "../types";
 import { toDateStr, toDateTimeStr, todayStr } from "../lib/date";
-import { toMinutes } from "../domain/attendance/attendanceCalculator";
-import { useEditableProfile } from "../lib/profileStore";
+import { getActiveSegmentIndex, selectDailyPunches, toMinutes } from "../domain/attendance/attendanceCalculator";
 import { useI18n } from "../i18n";
 
-/** 夜班归属日：跨夜班次的下班打卡（凌晨时段）应归属"班次开始的那一天"，而不是打卡时的自然日 */
-function computeAttendanceDate(shiftStartTime: string, crossesMidnight: boolean): string {
+/** 夜班归属日：只要班次里任意一段的下班打卡窗口会跨夜，且现在时间早于第一段应上班时间，
+ *  就把"现在"归到"昨天"的考勤日——即跨夜段的下班打卡应算作昨晚那个班次的收尾。 */
+function computeAttendanceDate(shift: Shift): string {
+  const crossesMidnight = shift.segments.some((s) => s.clockOutWindowCrossesMidnight);
   if (!crossesMidnight) return todayStr();
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  if (nowMinutes < toMinutes(shiftStartTime)) {
+  const firstStart = toMinutes(shift.segments[0]?.startTime ?? "00:00");
+  if (nowMinutes < firstStart) {
     const y = new Date();
     y.setDate(y.getDate() - 1);
     return toDateStr(y);
@@ -22,13 +24,17 @@ function computeAttendanceDate(shiftStartTime: string, crossesMidnight: boolean)
   return todayStr();
 }
 
+function fmtWindowTime(t: string): string {
+  return t;
+}
+
 export default function ClockIn() {
   const { t, lang } = useI18n();
-  const editable = useEditableProfile();
   const SESSION_LABEL: Record<ClockSession, string> = { in: t("clockIn.inLabel"), out: t("clockIn.outLabel") };
   const [records, setRecords] = useState<ClockRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<ClockSession | null>(null);
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [now, setNow] = useState(new Date());
@@ -47,14 +53,11 @@ export default function ClockIn() {
     load();
   }, []);
 
-  const attendanceDate = useMemo(() => {
-    const shift = getEffectiveShiftSync(PROFILE.employeeId, todayStr());
-    return computeAttendanceDate(shift.startTime, shift.crossesMidnight);
-  }, [now.getMinutes()]);
-
-  const todaySessions = useMemo(() => getTodaySessions(records, attendanceDate), [records, attendanceDate]);
-  const nextSession: ClockSession = todaySessions.includes("in") ? "out" : "in";
+  const shift = useMemo(() => getEffectiveShiftSync(PROFILE.employeeId, todayStr()), [now.getMinutes()]);
+  const attendanceDate = useMemo(() => computeAttendanceDate(shift), [shift, now.getMinutes()]);
   const todayRecords = records.filter((r) => r.attendanceDate === attendanceDate);
+  const punches = useMemo(() => selectDailyPunches(records, attendanceDate, shift), [records, attendanceDate, shift]);
+  const activeSegmentIndex = useMemo(() => getActiveSegmentIndex(shift, now), [shift, now]);
 
   useEffect(() => {
     if (!toast) return;
@@ -62,11 +65,8 @@ export default function ClockIn() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  function openCamera(session: ClockSession) {
-    if (todaySessions.includes(session)) {
-      setToast(t("clockIn.duplicateToast", { label: SESSION_LABEL[session] }));
-      return;
-    }
+  function openCamera(segmentId: string, session: ClockSession) {
+    setActiveSegmentId(segmentId);
     setActiveSession(session);
   }
 
@@ -87,6 +87,7 @@ export default function ClockIn() {
       locationAbnormal: result.geo.abnormal,
     });
     setActiveSession(null);
+    setActiveSegmentId(null);
     setToast(
       t("clockIn.successToast", {
         label: SESSION_LABEL[record.session],
@@ -96,11 +97,21 @@ export default function ClockIn() {
     load();
   }
 
+  // 当前生效段的下一步动作：该段还没打上班卡 → in；已打上班卡但没打下班卡 → out；都打了 → null
+  const activeSegmentResult = activeSegmentIndex >= 0 ? punches.bySegment[activeSegmentIndex] : undefined;
+  const activeNextSession: ClockSession | null = activeSegmentResult
+    ? !activeSegmentResult.clockIn
+      ? "in"
+      : !activeSegmentResult.clockOut
+        ? "out"
+        : null
+    : null;
+
   return (
     <div className="mx-auto max-w-md animate-page-in px-4 pb-28 pt-6">
       <header className="flex items-center justify-between">
         <div>
-          <p className="text-sm text-slate-500">{t("clockIn.greeting", { name: editable.name })}</p>
+          <p className="text-sm text-slate-500">{t("clockIn.greeting", { name: PROFILE.name })}</p>
           <p className="text-xs text-slate-400">
             {PROFILE.department} · {PROFILE.employeeId}
           </p>
@@ -114,45 +125,94 @@ export default function ClockIn() {
       </header>
 
       <section className="mt-6 rounded-3xl bg-gradient-to-br from-[#123A28] via-[#2A6E45] to-[#4F9A48] p-6 text-white shadow-lg shadow-brand-700/20">
-        <p className="text-sm text-white/80">{nextSession === "in" ? t("clockIn.notYetIn") : t("clockIn.inDoneReminder")}</p>
-        <div className="mt-4 flex items-center justify-between">
-          <div>
-            <p className="text-2xl font-semibold">{SESSION_LABEL[nextSession]}</p>
-            <p className="mt-1 text-xs text-white/70">{t("clockIn.tapHint")}</p>
+        {activeSegmentResult && activeNextSession ? (
+          <>
+            <p className="text-sm text-white/80">
+              {t("clockIn.segmentLabel", { n: activeSegmentIndex + 1 })} · {t("clockIn.statusActive")}
+            </p>
+            <div className="mt-4 flex items-center justify-between">
+              <div>
+                <p className="text-2xl font-semibold">{SESSION_LABEL[activeNextSession]}</p>
+                <p className="mt-1 text-xs text-white/70">{t("clockIn.tapHint")}</p>
+              </div>
+              <button
+                onClick={() => openCamera(activeSegmentResult.segment.id, activeNextSession)}
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-brand-700 shadow-md active:scale-95"
+                aria-label={SESSION_LABEL[activeNextSession]}
+              >
+                <Camera size={26} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15">
+              <Clock3 size={20} />
+            </span>
+            <div>
+              <p className="text-sm font-medium">{t("clockIn.noActiveWindow")}</p>
+              {(() => {
+                const upcoming = shift.segments.find((_, i) => i > activeSegmentIndex || activeSegmentIndex < 0);
+                return upcoming ? (
+                  <p className="mt-0.5 text-xs text-white/70">{t("clockIn.nextWindowHint", { time: upcoming.clockInWindowStart })}</p>
+                ) : null;
+              })()}
+            </div>
           </div>
-          <button
-            onClick={() => openCamera(nextSession)}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-brand-700 shadow-md active:scale-95"
-            aria-label={SESSION_LABEL[nextSession]}
-          >
-            <Camera size={26} />
-          </button>
-        </div>
+        )}
       </section>
 
-      <section className="mt-4 grid grid-cols-2 gap-3">
-        {(["in", "out"] as ClockSession[]).map((s) => {
-          const done = todaySessions.includes(s);
+      <section className="mt-4 space-y-2.5">
+        {shift.segments.map((segment, i) => {
+          const seg = punches.bySegment[i];
+          const doneIn = !!seg?.clockIn;
+          const doneOut = !!seg?.clockOut;
+          const isFullyDone = doneIn && (!segment.clockOutRequired || doneOut);
+          const isActive = i === activeSegmentIndex;
+          const nowMinutes = now.getHours() * 60 + now.getMinutes();
+          const isUpcoming = !isActive && !isFullyDone && nowMinutes < toMinutes(segment.clockInWindowStart);
+          const isMissed = !isActive && !isFullyDone && !isUpcoming;
+
           return (
-            <button
-              key={s}
-              onClick={() => openCamera(s)}
-              className={`rounded-2xl border p-4 text-left transition ${
-                done ? "border-brand-100 bg-brand-50" : "border-slate-200 bg-white active:bg-slate-50"
+            <div
+              key={segment.id}
+              className={`rounded-2xl border p-4 transition ${
+                isActive ? "border-brand-200 bg-brand-50" : isFullyDone ? "border-slate-100 bg-white" : "border-slate-200 bg-white"
               }`}
             >
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                  {/* 用同一个图标做镜像，保证"进/出"视觉上互为反向，而不是两个观感不一致的图标 */}
-                  <LogIn size={15} className={`${s === "out" ? "-scale-x-100" : ""} ${done ? "text-brand-600" : "text-slate-400"}`} />
-                  {SESSION_LABEL[s]}
+                  {isFullyDone && <CheckCircle2 size={15} className="text-brand-600" />}
+                  {t("clockIn.segmentLabel", { n: i + 1 })}
+                  <span className="font-normal text-slate-400">
+                    {fmtWindowTime(segment.startTime)}–{fmtWindowTime(segment.endTime)}
+                  </span>
                 </span>
-                {done && <CheckCircle2 size={16} className="text-brand-600" />}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    isActive
+                      ? "bg-brand-100 text-brand-700"
+                      : isFullyDone
+                        ? "bg-slate-100 text-slate-500"
+                        : isMissed
+                          ? "bg-rose-50 text-rose-500"
+                          : "bg-slate-50 text-slate-400"
+                  }`}
+                >
+                  {isFullyDone ? t("clockIn.statusDone") : isActive ? t("clockIn.statusActive") : isMissed ? t("clockIn.statusMissed") : t("clockIn.statusUpcoming", { time: segment.clockInWindowStart })}
+                </span>
               </div>
-              <p className="mt-1 text-xs text-slate-400">
-                {done ? toDateTimeStr(new Date(todayRecords.find((r) => r.session === s)!.clockTime)).slice(11) : t("clockIn.notClocked")}
-              </p>
-            </button>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500">
+                <div>
+                  {t("clockIn.inLabel")}：
+                  {doneIn ? <span className="text-slate-700">{toDateTimeStr(new Date(seg!.clockIn!.clockTime)).slice(11)}</span> : t("clockIn.notClocked")}
+                </div>
+                <div>
+                  {t("clockIn.outLabel")}：
+                  {doneOut ? <span className="text-slate-700">{toDateTimeStr(new Date(seg!.clockOut!.clockTime)).slice(11)}</span> : t("clockIn.notClocked")}
+                </div>
+              </div>
+            </div>
           );
         })}
       </section>
@@ -202,8 +262,15 @@ export default function ClockIn() {
         )}
       </section>
 
-      {activeSession && (
-        <CameraCapture sessionLabel={SESSION_LABEL[activeSession]} onCancel={() => setActiveSession(null)} onConfirm={handleConfirm} />
+      {activeSession && activeSegmentId && (
+        <CameraCapture
+          sessionLabel={`${SESSION_LABEL[activeSession]} · ${t("clockIn.segmentLabel", { n: (shift.segments.findIndex((s) => s.id === activeSegmentId) ?? 0) + 1 })}`}
+          onCancel={() => {
+            setActiveSession(null);
+            setActiveSegmentId(null);
+          }}
+          onConfirm={handleConfirm}
+        />
       )}
 
       {previewSrc && <PhotoPreview src={previewSrc} onClose={() => setPreviewSrc(null)} />}

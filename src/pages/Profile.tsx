@@ -1,25 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Pencil, RotateCcw, ShieldCheck, User } from "lucide-react";
-import { PROFILE, resetDemoData } from "../lib/mockApi";
+import { LogOut, RotateCcw, ShieldCheck, User } from "lucide-react";
+import { PROFILE, resetLocalData } from "../lib/mockApi";
 import { getSession, logout } from "../lib/auth";
-import { useEditableProfile } from "../lib/profileStore";
-import ProfileEditSheet from "../components/ProfileEditSheet";
-import { useI18n } from "../i18n";
+import { useI18n, payCycleLabel, genderLabel } from "../i18n";
 import type { Lang } from "../i18n";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Profile() {
   const navigate = useNavigate();
   const { t, lang, setLang } = useI18n();
-  const editable = useEditableProfile();
   const [loggingOut, setLoggingOut] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const session = getSession();
 
   function handleReset() {
-    resetDemoData();
+    resetLocalData();
     navigate("/login", { replace: true });
     window.location.reload();
   }
@@ -37,24 +34,22 @@ export default function Profile() {
 
       <section className="relative mt-4 flex items-center gap-4 rounded-3xl bg-gradient-to-br from-[#123A28] via-[#2A6E45] to-[#4F9A48] p-5 text-white">
         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/15">
-          {editable.avatarDataUrl ? (
-            <img src={editable.avatarDataUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <User size={26} />
-          )}
+          {PROFILE.avatarDataUrl ? <img src={PROFILE.avatarDataUrl} alt="" className="h-full w-full object-cover" /> : <User size={26} />}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold">{editable.name}</p>
+          <p className="truncate text-base font-semibold">{PROFILE.name}</p>
           <p className="mt-0.5 truncate text-xs text-white/75">{PROFILE.department}</p>
           <p className="text-xs text-white/75">{PROFILE.employeeId}</p>
         </div>
-        <button
-          onClick={() => setEditOpen(true)}
-          aria-label={t("profile.editProfile")}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 active:bg-white/25"
-        >
-          <Pencil size={14} />
-        </button>
+      </section>
+
+      {/* 员工基本信息：全部来自 HR 系统，只读展示，员工端不提供自助编辑入口 */}
+      <section className="mt-4 space-y-2 rounded-2xl bg-white p-4 text-sm">
+        <Row label={t("profile.fieldName")} value={PROFILE.name} />
+        <Row label={t("profile.gender")} value={genderLabel(lang, PROFILE.gender)} />
+        <Row label={t("profile.fieldDepartment")} value={PROFILE.department} />
+        <Row label={t("profile.fieldPhone")} value={PROFILE.phoneNumber} />
+        <Row label={t("profile.fieldPayCycle")} value={payCycleLabel(lang, PROFILE.payCycle)} />
       </section>
 
       <section className="mt-4 rounded-2xl bg-white p-4">
@@ -84,61 +79,43 @@ export default function Profile() {
         {t("profile.privacyNote")}
       </section>
 
-      {!resetConfirmOpen ? (
-        <button
-          onClick={() => setResetConfirmOpen(true)}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 py-3 text-sm font-medium text-slate-500 active:bg-slate-50"
-        >
-          <RotateCcw size={16} />
-          {t("profile.resetDemo")}
-        </button>
-      ) : (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="mb-3 text-sm text-slate-600">{t("profile.resetDemoConfirm")}</p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setResetConfirmOpen(false)}
-              className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm text-slate-600"
-            >
-              {t("profile.logoutCancel")}
-            </button>
-            <button onClick={handleReset} className="flex-1 rounded-xl bg-slate-700 py-2.5 text-sm font-medium text-white">
-              {t("profile.resetDemoConfirmBtn")}
-            </button>
-          </div>
-        </div>
+      <button
+        onClick={() => setResetConfirmOpen(true)}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 py-3 text-sm font-medium text-slate-500 active:bg-slate-50"
+      >
+        <RotateCcw size={16} />
+        {t("profile.resetLocalData")}
+      </button>
+
+      <button
+        onClick={() => setConfirmOpen(true)}
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 py-3 text-sm font-medium text-rose-600 active:bg-rose-50"
+      >
+        <LogOut size={16} />
+        {t("profile.logout")}
+      </button>
+
+      {resetConfirmOpen && (
+        <ConfirmDialog
+          body={t("profile.resetLocalDataConfirm")}
+          cancelLabel={t("profile.logoutCancel")}
+          confirmLabel={t("profile.resetLocalDataConfirmBtn")}
+          onCancel={() => setResetConfirmOpen(false)}
+          onConfirm={handleReset}
+        />
       )}
 
-      {!confirmOpen ? (
-        <button
-          onClick={() => setConfirmOpen(true)}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 py-3 text-sm font-medium text-rose-600 active:bg-rose-50"
-        >
-          <LogOut size={16} />
-          {t("profile.logout")}
-        </button>
-      ) : (
-        <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4">
-          <p className="mb-3 text-sm text-rose-700">{t("profile.logoutConfirmBody")}</p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setConfirmOpen(false)}
-              className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm text-slate-600"
-            >
-              {t("profile.logoutCancel")}
-            </button>
-            <button
-              disabled={loggingOut}
-              onClick={handleLogout}
-              className="flex-1 rounded-xl bg-rose-600 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-            >
-              {loggingOut ? t("profile.loggingOut") : t("profile.logoutConfirmBtn")}
-            </button>
-          </div>
-        </div>
+      {confirmOpen && (
+        <ConfirmDialog
+          body={t("profile.logoutConfirmBody")}
+          cancelLabel={t("profile.logoutCancel")}
+          confirmLabel={loggingOut ? t("profile.loggingOut") : t("profile.logoutConfirmBtn")}
+          tone="danger"
+          busy={loggingOut}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={handleLogout}
+        />
       )}
-
-      {editOpen && <ProfileEditSheet onClose={() => setEditOpen(false)} />}
     </div>
   );
 }

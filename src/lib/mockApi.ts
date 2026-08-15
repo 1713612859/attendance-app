@@ -22,13 +22,21 @@ const KEYS = {
   profile: "profile",
   shifts: "shifts",
   shiftAssignments: "shiftAssignments",
-  seeded: "seeded_v3",
+  // v4：Shift 从 { startTime, endTime } 改成多段 { segments }，旧版本种子数据形状不兼容，
+  // 版本号必须变化才能让下面的 seedIfNeeded() 重新播种，而不是复用不匹配新代码的旧数据。
+  // （见 BUSINESS_LOGIC_REVIEW.md 中"localStorage 需要版本管理"一项——这里是最小实现：
+  // 直接靠 bump 版本号触发整体重新播种，还没做到按字段迁移旧数据。）
+  seeded: "seeded_v4",
 };
 
 export const PROFILE: EmployeeProfile = {
   employeeId: "EMP-PH-10086",
   name: "Juan Dela Cruz",
   department: "Engineering Department · Makati Site",
+  gender: "male",
+  avatarDataUrl: undefined,
+  phoneNumber: "+63 917 123 4567",
+  payCycle: "semi-monthly",
 };
 
 const SAMPLE_ADDRESS = "Ayala Ave, Makati City, Metro Manila, Philippines (sample address)";
@@ -294,6 +302,10 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
       // 已存在正常打卡，不重复生成，仅在审批意见中记录冲突，供 HR 人工复核
       comment = "Approved, but a normal clock record already exists for this date/session — no duplicate record was created.";
     } else if (!existing) {
+      // 补卡时间取该员工当天生效班次的第一段应出勤时间，而不是写死 09:00/18:00
+      const shift = getEffectiveShiftSync(item.employeeId, item.date);
+      const seg = shift.segments[0];
+      const time = item.session === "in" ? seg.startTime : seg.endTime;
       const clock = loadList<ClockRecord>(KEYS.clock);
       clock.push({
         id: uid(),
@@ -301,7 +313,7 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
         date: item.date,
         attendanceDate: item.date,
         session: item.session,
-        clockTime: `${item.date}T${item.session === "in" ? "09:00" : "18:00"}:00`,
+        clockTime: `${item.date}T${time}:00`,
         photoDataUrl: "",
         photoStatus: "missing",
         locationAbnormal: false,
@@ -318,13 +330,27 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
     const assignments = loadList<EmployeeShiftAssignment>(KEYS.shiftAssignments);
     const shifts = loadList<Shift>(KEYS.shifts);
     const shiftId = `shift-${item.id}`;
+    const crossesMidnight = toMinutesLocal(item.requestedEnd) <= toMinutesLocal(item.requestedStart);
+    // 打卡窗口：提前 2 小时可打上班卡，下班后延后 4 小时（或跨夜到次日）可补打下班卡——
+    // 经验默认值，与新增班次一致，非法定标准，正式系统应由企业配置。
+    const clockInWindowStart = shiftTimeBy(item.requestedStart, -120).time;
+    const outWindow = shiftTimeBy(item.requestedEnd, 240);
     shifts.push({
       id: shiftId,
       name: "Adjusted Shift",
-      startTime: item.requestedStart,
-      endTime: item.requestedEnd,
       graceMinutes: 5,
-      crossesMidnight: toMinutesLocal(item.requestedEnd) <= toMinutesLocal(item.requestedStart),
+      segments: [
+        {
+          id: "seg-1",
+          startTime: item.requestedStart,
+          endTime: item.requestedEnd,
+          clockInRequired: true,
+          clockInWindowStart,
+          clockOutRequired: true,
+          clockOutWindowEnd: outWindow.time,
+          clockOutWindowCrossesMidnight: crossesMidnight || outWindow.crossedMidnight,
+        },
+      ],
     });
     saveList(KEYS.shifts, shifts);
     assignments.push({
@@ -353,6 +379,15 @@ function toMinutesLocal(time: string): number {
   return h * 60 + m;
 }
 
+function shiftTimeBy(time: string, deltaMinutes: number): { time: string; crossedMidnight: boolean } {
+  const total = toMinutesLocal(time) + deltaMinutes;
+  const crossedMidnight = total >= 1440 || total < 0;
+  const norm = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(norm / 60);
+  const m = norm % 60;
+  return { time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, crossedMidnight };
+}
+
 export function countByKind(list: ApplyRecord[], kind: ApplyKind): ApplyRecord[] {
   return list.filter((a) => a.kind === kind);
 }
@@ -363,9 +398,10 @@ export async function fetchPayslips(): Promise<Payslip[]> {
   return loadList<Payslip>(KEYS.payslips).sort((a, b) => (a.month < b.month ? 1 : -1));
 }
 
-// ---------- Demo 数据管理 ----------
-export function resetDemoData(): void {
+// ---------- 本地数据管理 ----------
+// 清空本机 localStorage 里的全部本地数据，恢复到初始种子数据——纯前端 Demo 阶段的
+// 调试/演示工具，正式接入后端后这类操作应由后端数据管理，不会出现在员工端。
+export function resetLocalData(): void {
   Object.values(KEYS).forEach((k) => localStorage.removeItem(`attendance-demo:${k}`));
   localStorage.removeItem("attendance-demo:session");
-  localStorage.removeItem("attendance-demo:profileOverrides");
 }

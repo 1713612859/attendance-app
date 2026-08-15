@@ -115,14 +115,30 @@ export type ApplyRecord = CorrectionApply | LeaveApply | OvertimeApply | ShiftCh
 export type ApplyKind = ApplyRecord["kind"];
 
 // ---------- 班次与排班（业务逻辑审查后新增）----------
+//
+// 多段班次模型：参照真实后端系统的班次配置（工作日 + 多段打卡时间 + 每段独立的
+// 打卡窗口——最早/最晚可打卡时间），而不是简单的一条 startTime/endTime。
+// 关键点：员工"应出勤时间"（startTime/endTime，用于迟到/早退判定）
+// 和"允许打卡的时间窗口"（clockInWindowStart/clockOutWindowEnd，用于控制打卡按钮是否可点）
+// 是两个独立概念——允许提前一段时间打上班卡，也允许下班后一段时间内补打下班卡，
+// 但迟到/早退仍然按"应出勤时间"判定，不能因为打卡窗口宽松就误判成正常。
+
+export interface ShiftSegment {
+  id: string;
+  startTime: string; // HH:mm，应上班时间（迟到判定基准）
+  endTime: string; // HH:mm，应下班时间（早退判定基准）
+  clockInRequired: boolean;
+  clockInWindowStart: string; // HH:mm，最早可打上班卡时间
+  clockOutRequired: boolean;
+  clockOutWindowEnd: string; // HH:mm，最晚可打下班卡时间
+  clockOutWindowCrossesMidnight: boolean; // 最晚可打卡时间是否为"次日"（夜班场景）
+}
 
 export interface Shift {
   id: string;
   name: string;
-  startTime: string; // HH:mm
-  endTime: string; // HH:mm
-  graceMinutes: number; // 迟到宽限分钟数
-  crossesMidnight: boolean; // 是否跨夜（endTime < startTime）
+  graceMinutes: number; // 迟到宽限分钟数，应用于每段的 startTime
+  segments: ShiftSegment[]; // 一天可有多段（如上午/下午两段），按 startTime 升序排列
 }
 
 export interface EmployeeShiftAssignment {
@@ -141,6 +157,9 @@ export interface PayslipItem {
   amount: number;
 }
 
+/**
+ * Payslip 数据模型设计对齐 PRD 3.3 节，方针后续替换为真实后端接口
+ */
 export interface Payslip {
   id: string;
   month: string; // YYYY-MM，用于分组展示
@@ -155,8 +174,17 @@ export interface Payslip {
   isDemoData: true; // 恒为 true：提醒这是示例费率，不可当真实工资条使用
 }
 
+export type Gender = "male" | "female" | "unspecified";
+export type PayCycle = "weekly" | "semi-monthly" | "monthly";
+
+// 全部字段均来自 HR/后端系统，员工端只读展示，不提供自助编辑入口
+// （工号/部门历来如此；姓名/性别/头像/手机号/发薪周期原先误做成了员工可编辑，现已改为只读）。
 export interface EmployeeProfile {
   employeeId: string;
   name: string;
   department: string;
+  gender: Gender;
+  avatarDataUrl?: string;
+  phoneNumber: string;
+  payCycle: PayCycle;
 }

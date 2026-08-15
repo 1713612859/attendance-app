@@ -3,16 +3,37 @@
 // - 迟到判断此前是 `hour >= 9 && minute > 5`，导致 10:00、11:03 等被误判为"未迟到"
 //   （因为这些时间的 minute 部分本身 <=5 或恰好卡在边界）。现在统一换算成"当天分钟数"比较。
 
-import type { ClockRecord, ClockSession, Shift } from "../../types";
+import type { ClockRecord, ClockSession, Shift, ShiftSegment } from "../../types";
 import { getHoliday } from "../../lib/holidays";
 
+// 默认班次：两段式（上午/下午），数值参照真实后端系统常见配置——
+// 允许提前 3 小时打上班卡，下班卡窗口延后到下一段开始前 / 跨夜到次日。
 export const DEFAULT_SHIFT: Shift = {
   id: "default",
-  name: "Day Shift",
-  startTime: "09:00",
-  endTime: "18:00",
+  name: "Day Shift (Two Segments)",
   graceMinutes: 5,
-  crossesMidnight: false,
+  segments: [
+    {
+      id: "seg-am",
+      startTime: "08:00",
+      endTime: "12:00",
+      clockInRequired: true,
+      clockInWindowStart: "05:00",
+      clockOutRequired: true,
+      clockOutWindowEnd: "12:29",
+      clockOutWindowCrossesMidnight: false,
+    },
+    {
+      id: "seg-pm",
+      startTime: "13:00",
+      endTime: "18:00",
+      clockInRequired: true,
+      clockInWindowStart: "12:30",
+      clockOutRequired: true,
+      clockOutWindowEnd: "23:59",
+      clockOutWindowCrossesMidnight: false,
+    },
+  ],
 };
 
 // 默认排班：周一至周五为工作日，周六周日为休息日。
@@ -43,37 +64,98 @@ function clockTimeMinutes(iso: string): number {
 }
 
 /** 迟到判断：以"当天分钟数"整体比较，而非只比较分钟位，避免 10:00/11:03 被漏判 */
-export function isLateClockIn(clockTimeIso: string, shift: Shift): boolean {
+export function isLateForSegment(clockTimeIso: string, segment: ShiftSegment, graceMinutes: number): boolean {
   const actual = clockTimeMinutes(clockTimeIso);
-  const scheduledStart = toMinutes(shift.startTime);
-  return actual > scheduledStart + shift.graceMinutes;
+  return actual > toMinutes(segment.startTime) + graceMinutes;
 }
 
-/** 早退判断：下班打卡早于班次结束时间 */
-export function isEarlyLeaveClockOut(clockTimeIso: string, shift: Shift): boolean {
+/** 早退判断：下班打卡早于该段应下班时间 */
+export function isEarlyLeaveForSegment(clockTimeIso: string, segment: ShiftSegment): boolean {
   const actual = clockTimeMinutes(clockTimeIso);
-  const scheduledEnd = toMinutes(shift.endTime);
-  return actual < scheduledEnd;
+  return actual < toMinutes(segment.endTime);
+}
+
+/** 某一段的打卡窗口（相对当天 0 点的分钟数），跨夜时 outEnd 会 >1440 */
+export function segmentWindowMinutes(segment: ShiftSegment): { inStart: number; outEnd: number } {
+  const inStart = toMinutes(segment.clockInWindowStart);
+  const outEnd = toMinutes(segment.clockOutWindowEnd) + (segment.clockOutWindowCrossesMidnight ? 1440 : 0);
+  return { inStart, outEnd };
+}
+
+/** 当前时间（当天 0 点起的分钟数）是否落在该段的打卡窗口内；跨夜段会额外按 +1440 再判一次，
+ *  这样"凌晨 0:30"既能匹配"今天开始、跨夜到明天"的段，也不会漏判本来就该在今天判断的段 */
+export function isNowInSegmentWindow(segment: ShiftSegment, nowMinutes: number): boolean {
+  const { inStart, outEnd } = segmentWindowMinutes(segment);
+  if (nowMinutes >= inStart && nowMinutes <= outEnd) return true;
+  if (segment.clockOutWindowCrossesMidnight && nowMinutes + 1440 >= inStart && nowMinutes + 1440 <= outEnd) return true;
+  return false;
+}
+
+/** 当前生效的段序号：窗口包含"现在"的那一段；不存在（比如两段之间的间隙）时返回 -1 */
+export function getActiveSegmentIndex(shift: Shift, now: Date = new Date()): number {
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return shift.segments.findIndex((seg) => isNowInSegmentWindow(seg, nowMinutes));
+}
+
+export interface SegmentPunchResult {
+  segment: ShiftSegment;
+  index: number;
+  clockIn?: ClockRecord;
+  clockOut?: ClockRecord;
 }
 
 export interface DailyPunchResult {
-  clockIn?: ClockRecord;
-  clockOut?: ClockRecord;
+  clockIn?: ClockRecord; // 全天最早一次上班打卡（用于迟到判定兜底/展示）
+  clockOut?: ClockRecord; // 全天最晚一次下班打卡（用于早退判定兜底/展示）
   allRecords: ClockRecord[];
+  bySegment: SegmentPunchResult[];
 }
 
 /**
- * 打卡记录选择策略：上班取当天所有有效(valid) in 记录中最早一条，
- * 下班取最晚一条。不再直接使用数组第一个元素。
+ * 打卡记录按"段"配对：按打卡时间落在哪一段的打卡窗口内匹配，而不是按当天第几次打卡简单排序配对——
+ * 顺序配对在非工作时间测试打卡、补卡等场景下会把打卡错配到错误的段（比如 22:34 的打卡被当成
+ * "今天第一次上班卡"就配进了第 1 段 08:00–12:00，尽管这个时间明显落在第 2 段的窗口里）。
+ * 窗口外的打卡（理论上不应出现，兜底处理）退化为"应出勤时间最接近"的那一段。
  */
-export function selectDailyPunches(records: ClockRecord[], attendanceDate: string): DailyPunchResult {
-  const dayRecords = records.filter((r) => r.attendanceDate === attendanceDate && r.status === "valid");
-  const ins = dayRecords.filter((r) => r.session === "in").sort((a, b) => (a.clockTime < b.clockTime ? -1 : 1));
-  const outs = dayRecords.filter((r) => r.session === "out").sort((a, b) => (a.clockTime < b.clockTime ? -1 : 1));
+export function selectDailyPunches(records: ClockRecord[], attendanceDate: string, shift: Shift = DEFAULT_SHIFT): DailyPunchResult {
+  const dayRecords = records
+    .filter((r) => r.attendanceDate === attendanceDate && r.status === "valid")
+    .sort((a, b) => (a.clockTime < b.clockTime ? -1 : 1));
+
+  function matchSegmentIndex(record: ClockRecord): number {
+    const recordMinutes = clockTimeMinutes(record.clockTime);
+    const byWindow = shift.segments.findIndex((seg) => isNowInSegmentWindow(seg, recordMinutes));
+    if (byWindow >= 0) return byWindow;
+    let best = 0;
+    let bestDiff = Infinity;
+    shift.segments.forEach((seg, i) => {
+      const diff = Math.abs(toMinutes(seg.startTime) - recordMinutes);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    });
+    return best;
+  }
+
+  const bySegment: SegmentPunchResult[] = shift.segments.map((segment, index) => ({ segment, index }));
+  dayRecords.forEach((r) => {
+    const slot = bySegment[matchSegmentIndex(r)];
+    if (r.session === "in") {
+      if (!slot.clockIn || r.clockTime < slot.clockIn.clockTime) slot.clockIn = r; // 同段多次上班卡取最早
+    } else {
+      if (!slot.clockOut || r.clockTime > slot.clockOut.clockTime) slot.clockOut = r; // 同段多次下班卡取最晚
+    }
+  });
+
+  const ins = dayRecords.filter((r) => r.session === "in");
+  const outs = dayRecords.filter((r) => r.session === "out");
+
   return {
     clockIn: ins[0],
     clockOut: outs[outs.length - 1],
     allRecords: dayRecords,
+    bySegment,
   };
 }
 
@@ -100,14 +182,18 @@ interface ComputeInput {
 export function computeDailyAttendance(input: ComputeInput): DailyAttendanceResult {
   const { date, records, shift, isFullDayLeave, overtimeHours, isFuture } = input;
   const dayType = getDayType(date);
-  const punches = selectDailyPunches(records, date);
+  const punches = selectDailyPunches(records, date, shift);
   const tags: AttendanceTag[] = [];
 
   const isHoliday = dayType === "regular-holiday" || dayType === "special-non-working-holiday";
   if (isHoliday) tags.push("holiday");
   if (isFullDayLeave) tags.push("on-leave");
-  if (punches.clockIn && isLateClockIn(punches.clockIn.clockTime, shift)) tags.push("late");
-  if (punches.clockOut && isEarlyLeaveClockOut(punches.clockOut.clockTime, shift)) tags.push("early-leave");
+  // 迟到/早退按段分别判定，任意一段出现即算当天迟到/早退（日历只做"当天是否有问题"的粗粒度展示，
+  // 具体是哪一段、迟到几分钟，在当天详情里按段展开）
+  const anyLate = punches.bySegment.some((s) => s.clockIn && isLateForSegment(s.clockIn.clockTime, s.segment, shift.graceMinutes));
+  const anyEarly = punches.bySegment.some((s) => s.clockOut && isEarlyLeaveForSegment(s.clockOut.clockTime, s.segment));
+  if (anyLate) tags.push("late");
+  if (anyEarly) tags.push("early-leave");
   if (overtimeHours > 0) tags.push("overtime");
 
   // 缺勤：仅工作日、非请假覆盖、且没有任何有效打卡时成立；节假日/休息日/未来日期均不算缺勤

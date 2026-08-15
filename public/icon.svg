@@ -1,11 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#16a34a"/>
-      <stop offset="100%" stop-color="#0b6e30"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#16a34a" />
+      <stop offset="100%" stop-color="#0b6e30" />
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#g)"/>
-  <path d="M256 120a136 136 0 1 0 .1 0z" fill="none" stroke="#ffffff" stroke-width="22"/>
-  <path d="M180 260l52 52 100-110" fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="4" y="4" width="112" height="112" rx="26" fill="url(#bg)" />
+  <!-- 表盘：圆环 + 12点刻度，读作"时间/考勤" -->
+  <circle cx="60" cy="58" r="34" fill="none" stroke="#ffffff" stroke-width="7" opacity="0.95" />
+  <line x1="60" y1="22" x2="60" y2="30" stroke="#ffffff" stroke-width="7" stroke-linecap="round" />
+  <!-- 对勾：读作"已确认/已打卡"，与表盘叠加成一个复合图形，而不是两个独立元素堆砌 -->
+  <path d="M44 59 L54 70 L79 44" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
 </svg>

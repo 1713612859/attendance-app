@@ -107,24 +107,21 @@ export default function ApplyDetail({ record, onClose, onChanged }: Props) {
         )}
 
         {record.status === "pending" && (
-          <div className="mt-3 rounded-2xl border border-dashed border-slate-200 p-3">
-            <p className="mb-2 text-[11px] text-slate-400">{t("applyDetail.demoNote")}</p>
-            <div className="flex gap-2">
-              <button
-                disabled={busy}
-                onClick={() => act(() => demoDecide(record.id, "approved"))}
-                className="flex-1 rounded-xl bg-brand-50 py-2 text-xs font-medium text-brand-700"
-              >
-                {t("applyDetail.demoApprove")}
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => act(() => demoDecide(record.id, "rejected"))}
-                className="flex-1 rounded-xl bg-rose-50 py-2 text-xs font-medium text-rose-600"
-              >
-                {t("applyDetail.demoReject")}
-              </button>
-            </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              disabled={busy}
+              onClick={() => act(() => demoDecide(record.id, "approved"))}
+              className="flex-1 rounded-xl bg-brand-50 py-2 text-xs font-medium text-brand-700"
+            >
+              {t("applyDetail.approve")}
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => act(() => demoDecide(record.id, "rejected"))}
+              className="flex-1 rounded-xl bg-rose-50 py-2 text-xs font-medium text-rose-600"
+            >
+              {t("applyDetail.reject")}
+            </button>
           </div>
         )}
     </Sheet>

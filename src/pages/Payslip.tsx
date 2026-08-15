@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarRange, ChevronRight, Fingerprint, ShieldCheck, Wallet } from "lucide-react";
+import { CalendarRange, ChevronRight, Wallet } from "lucide-react";
 import { fetchPayslips } from "../lib/mockApi";
 import type { Payslip } from "../types";
 import { useI18n } from "../i18n";
@@ -26,10 +26,6 @@ export default function PayslipPage() {
     <div className="mx-auto max-w-md animate-page-in px-4 pb-28 pt-6">
       <h1 className="text-lg font-semibold text-slate-800">{t("payslip.title")}</h1>
       <p className="mt-1 text-xs text-slate-400">{t("payslip.subtitle")}</p>
-
-      <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] font-medium leading-relaxed text-amber-800">
-        {t("payslip.demoBanner")}
-      </div>
 
       <div className="mt-4 space-y-2">
         {loading ? (
@@ -69,8 +65,6 @@ export default function PayslipPage() {
 
 function PayslipDetail({ payslip, onClose }: { payslip: Payslip; onClose: () => void }) {
   const { t } = useI18n();
-  const [verified, setVerified] = useState(false);
-  const [verifying, setVerifying] = useState(false);
 
   return (
     <Sheet onClose={onClose} title={t("payslip.detailTitle")}>
@@ -80,41 +74,18 @@ function PayslipDetail({ payslip, onClose }: { payslip: Payslip; onClose: () => 
         {t("payslip.payDateLabel", { date: payslip.payDate })}
       </p>
 
-      {!verified ? (
-        <div className="flex flex-col items-center gap-3 rounded-2xl bg-slate-50 py-10 text-center">
-          <ShieldCheck size={30} className="text-slate-300" />
-          <p className="px-6 text-xs text-slate-400">{t("payslip.verifyNote")}</p>
-          <button
-            disabled={verifying}
-            onClick={() => {
-              setVerifying(true);
-              setTimeout(() => {
-                setVerifying(false);
-                setVerified(true);
-              }, 700);
-            }}
-            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-          >
-            <Fingerprint size={16} />
-            {verifying ? t("payslip.verifying") : t("payslip.verifyBtn")}
-          </button>
-        </div>
-      ) : (
-        <>
-          <Section title={t("payslip.grossSection")} items={payslip.grossItems} total={payslip.grossTotal} subtotalLabel={t("payslip.subtotal")} tone="pos" />
-          <Section
-            title={t("payslip.deductionSection")}
-            items={payslip.deductionItems}
-            total={payslip.deductionTotal}
-            subtotalLabel={t("payslip.subtotal")}
-            tone="neg"
-          />
-          <div className="mt-4 flex items-center justify-between rounded-2xl bg-brand-50 px-4 py-3">
-            <span className="text-sm font-medium text-brand-700">{t("payslip.netTotal")}</span>
-            <span className="text-lg font-semibold text-brand-700">{money(payslip.netTotal)}</span>
-          </div>
-        </>
-      )}
+      <Section title={t("payslip.grossSection")} items={payslip.grossItems} total={payslip.grossTotal} subtotalLabel={t("payslip.subtotal")} tone="pos" />
+      <Section
+        title={t("payslip.deductionSection")}
+        items={payslip.deductionItems}
+        total={payslip.deductionTotal}
+        subtotalLabel={t("payslip.subtotal")}
+        tone="neg"
+      />
+      <div className="mt-4 flex items-center justify-between rounded-2xl bg-brand-50 px-4 py-3">
+        <span className="text-sm font-medium text-brand-700">{t("payslip.netTotal")}</span>
+        <span className="text-lg font-semibold text-brand-700">{money(payslip.netTotal)}</span>
+      </div>
     </Sheet>
   );
 }

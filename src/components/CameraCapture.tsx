@@ -5,7 +5,6 @@ import type { GeoResult } from "../lib/geo";
 import { drawPlaceholderPhoto, drawWatermark } from "../lib/watermark";
 import { toDateTimeStr } from "../lib/date";
 import { PROFILE } from "../lib/mockApi";
-import { getEditableProfile } from "../lib/profileStore";
 import { useI18n } from "../i18n";
 
 interface Props {
@@ -81,7 +80,7 @@ export default function CameraCapture({ sessionLabel, onCancel, onConfirm }: Pro
     const dataUrl = drawWatermark(canvas, {
       dateTimeStr: toDateTimeStr(now),
       address: geo.address ?? "-",
-      name: getEditableProfile().name || PROFILE.name,
+      name: PROFILE.name,
       employeeId: PROFILE.employeeId,
       sessionLabel,
       brandLabel: t("camera.watermarkBrand"),

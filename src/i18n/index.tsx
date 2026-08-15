@@ -73,3 +73,13 @@ export function leaveTypeLabel(lang: Lang, code: string): string {
   const dict = DICTS[lang].leaveTypeLabel as Record<string, string>;
   return dict[code] ?? code;
 }
+
+export function genderLabel(lang: Lang, code: string): string {
+  const dict = DICTS[lang].genderLabel as Record<string, string>;
+  return dict[code] ?? code;
+}
+
+export function payCycleLabel(lang: Lang, code: string): string {
+  const dict = DICTS[lang].payCycleLabel as Record<string, string>;
+  return dict[code] ?? code;
+}

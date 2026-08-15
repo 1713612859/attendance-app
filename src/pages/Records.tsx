@@ -9,25 +9,21 @@ import { getHoliday } from "../lib/holidays";
 import { useI18n, leaveTypeLabel } from "../i18n";
 import PhotoPreview from "../components/PhotoPreview";
 
-// 迟到/早退分别给独立颜色块，不再合并成一种颜色——两者是不同性质的问题，
-// 合并展示会让日历上看不出当天具体是哪一种（甚至两者都有）
+// 日历格子背景精简为 4 色：正常/异常/请假/节假日。迟到、早退、缺勤都属于"异常"这个大类，
+// 统一用同一个底色，不再让日历同时出现 6 种底色——具体是迟到/早退/缺勤，
+// 靠角标小圆点（见下方 dot 逻辑）和点开当天详情后的精确标签区分，颜色只负责"要不要注意"这一层判断。
 const CELL_STYLE: Record<string, string> = {
-  absent: "bg-rose-100 text-rose-700",
+  abnormal: "bg-rose-100 text-rose-700",
   "on-leave": "bg-sky-100 text-sky-700",
   holiday: "bg-indigo-100 text-indigo-700",
-  late: "bg-amber-100 text-amber-700",
-  earlyLeave: "bg-orange-100 text-orange-700",
   normal: "bg-brand-50 text-brand-700",
   none: "text-slate-600",
 };
 
 function primaryCellClass(result: DailyAttendanceResult): string {
-  if (result.tags.includes("absent")) return CELL_STYLE.absent;
+  if (result.tags.includes("absent") || result.tags.includes("late") || result.tags.includes("early-leave")) return CELL_STYLE.abnormal;
   if (result.tags.includes("on-leave")) return CELL_STYLE["on-leave"];
   if (result.tags.includes("holiday")) return CELL_STYLE.holiday;
-  // 两者都发生时，迟到作为主色，早退用小圆点在角上叠加提示（见 dotColorsFor）
-  if (result.tags.includes("late")) return CELL_STYLE.late;
-  if (result.tags.includes("early-leave")) return CELL_STYLE.earlyLeave;
   if (result.tags.includes("normal")) return CELL_STYLE.normal;
   return CELL_STYLE.none;
 }
@@ -159,8 +155,10 @@ export default function Records() {
             const cls = result ? primaryCellClass(result) : "text-slate-300";
             const notAbsent = !result?.tags.includes("absent");
             const showOvertimeDot = result?.tags.includes("overtime") && notAbsent;
-            // 迟到是主色时，若当天同时早退，用一个橙色小圆点在角上补充提示（反之亦然）
-            const showEarlyLeaveDot = result?.tags.includes("late") && result.tags.includes("early-leave") && notAbsent;
+            // 背景统一是"异常"色后，用角标小圆点区分具体是迟到还是早退（缺勤没有打卡记录，
+            // 不会跟迟到/早退同时出现，靠底色本身就够了，不用再叠一个点）
+            const showLateDot = result?.tags.includes("late") && notAbsent;
+            const showEarlyLeaveDot = result?.tags.includes("early-leave") && notAbsent;
             return (
               <button
                 key={dateStr}
@@ -175,25 +173,13 @@ export default function Records() {
               >
                 <span>{Number(dateStr.slice(-2))}</span>
                 <span className="absolute right-1 top-1 flex gap-0.5">
+                  {showLateDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-amber-500"}`} />}
                   {showEarlyLeaveDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-orange-500"}`} />}
                   {showOvertimeDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-violet-500"}`} />}
                 </span>
               </button>
             );
           })}
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-slate-100 pt-3 text-[11px] text-slate-500">
-          <LegendChip cls={CELL_STYLE.normal} label={t("records.legendNormal")} />
-          <LegendChip cls={CELL_STYLE.late} label={t("records.legendLate")} />
-          <LegendChip cls={CELL_STYLE.earlyLeave} label={t("records.legendEarlyLeave")} />
-          <LegendChip cls={CELL_STYLE["on-leave"]} label={t("records.legendLeave")} />
-          <LegendChip cls={CELL_STYLE.holiday} label={t("records.legendHoliday")} />
-          <LegendChip cls={CELL_STYLE.absent} label={t("records.legendAbsent")} />
-          <span className="inline-flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-            {t("records.legendOvertime")}
-          </span>
         </div>
       </div>
 
@@ -231,9 +217,8 @@ export default function Records() {
 
         <p className="mb-2 text-xs text-slate-400">
           {t("records.shiftLabel", {
-            start: selectedResult.shift.startTime,
-            end: selectedResult.shift.endTime,
             name: selectedResult.shift.name,
+            ranges: selectedResult.shift.segments.map((s) => `${s.startTime}–${s.endTime}`).join(", "),
           })}
         </p>
 
@@ -292,15 +277,6 @@ export default function Records() {
 
       {previewSrc && <PhotoPreview src={previewSrc} onClose={() => setPreviewSrc(null)} />}
     </div>
-  );
-}
-
-function LegendChip({ cls, label }: { cls: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span className={`h-3 w-3 rounded-md ${cls.split(" ")[0]}`} />
-      {label}
-    </span>
   );
 }
 
