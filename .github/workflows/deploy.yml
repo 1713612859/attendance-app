@@ -1,0 +1,49 @@
+name: Build and Deploy to Origin
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-origin
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy dist/ to origin over SSH (tar, no rsync needed)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Stream the build as a tar over SSH and extract into the site root.
+          # Only needs ssh + tar on the server (no rsync). The remote wipes the
+          # root's contents first so stale hashed assets don't accumulate.
+          # Skip Baota's immutable .user.ini (chattr +i) when wiping — it can't be
+          # deleted even by root and isn't part of the build anyway.
+          tar czf - -C dist . | ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            'set -e; d=/www/wwwroot/attendance-app; mkdir -p "$d"; find "$d" -mindepth 1 ! -name .user.ini -delete; tar xzf - -C "$d"'
