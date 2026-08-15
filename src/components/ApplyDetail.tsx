@@ -1,7 +1,7 @@
 import type { ApplyRecord } from "../types";
 import StatusBadge from "./StatusBadge";
 import ProgressSteps from "./ProgressSteps";
-import { demoDecide, withdrawApply } from "../lib/mockApi";
+import { demoDecide, getEffectiveShiftSync, withdrawApply } from "../lib/mockApi";
 import { useState } from "react";
 import { useI18n, leaveTypeLabel } from "../i18n";
 import Sheet from "./Sheet";
@@ -49,6 +49,14 @@ export default function ApplyDetail({ record, onClose, onChanged }: Props) {
             <>
               <Row label={t("applyDetail.correctionDate")} value={record.date} />
               <Row label={t("applyDetail.session")} value={record.session === "in" ? t("applyForm.sessionIn") : t("applyForm.sessionOut")} />
+              {record.segmentId &&
+                (() => {
+                  const shift = getEffectiveShiftSync(record.employeeId, record.date);
+                  const i = shift.segments.findIndex((s) => s.id === record.segmentId);
+                  const seg = i >= 0 ? shift.segments[i] : undefined;
+                  if (!seg) return null;
+                  return <Row label={t("applyForm.correctionSegment")} value={`${t("clockIn.segmentLabel", { n: i + 1 })} ${seg.startTime}–${seg.endTime}`} />;
+                })()}
               <Row label={t("applyDetail.reason")} value={record.reason} />
             </>
           )}
@@ -73,8 +81,8 @@ export default function ApplyDetail({ record, onClose, onChanged }: Props) {
           {record.kind === "shift" && (
             <>
               <Row label={t("applyDetail.shiftDate")} value={record.effectiveDate} />
-              <Row label={t("applyDetail.shiftCurrent")} value={`${record.currentStart} - ${record.currentEnd}`} />
-              <Row label={t("applyDetail.shiftRequested")} value={`${record.requestedStart} - ${record.requestedEnd}`} />
+              <Row label={t("applyDetail.shiftCurrent")} value={record.currentSegments.map((s) => `${s.startTime}-${s.endTime}`).join(", ")} />
+              <Row label={t("applyDetail.shiftRequested")} value={record.requestedSegments.map((s) => `${s.startTime}-${s.endTime}`).join(", ")} />
               <Row label={t("applyDetail.reason")} value={record.reason} />
             </>
           )}

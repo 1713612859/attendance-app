@@ -152,7 +152,11 @@ export default function ClockIn() {
             <div>
               <p className="text-sm font-medium">{t("clockIn.noActiveWindow")}</p>
               {(() => {
-                const upcoming = shift.segments.find((_, i) => i > activeSegmentIndex || activeSegmentIndex < 0);
+                // 找下一个"打卡窗口还没开放"的段，按窗口开放时间是否还没到来判断——不依赖 activeSegmentIndex，
+                // 之前那版写法在 activeSegmentIndex 恒为 -1 的分支里用 `activeSegmentIndex < 0` 当筛选条件，
+                // 对每个 i 都成立，结果永远只会命中第 1 段，哪怕第 1 段窗口早就关了
+                const nowMinutes = now.getHours() * 60 + now.getMinutes();
+                const upcoming = shift.segments.find((seg) => nowMinutes < toMinutes(seg.clockInWindowStart));
                 return upcoming ? (
                   <p className="mt-0.5 text-xs text-white/70">{t("clockIn.nextWindowHint", { time: upcoming.clockInWindowStart })}</p>
                 ) : null;
@@ -264,7 +268,11 @@ export default function ClockIn() {
 
       {activeSession && activeSegmentId && (
         <CameraCapture
-          sessionLabel={`${SESSION_LABEL[activeSession]} · ${t("clockIn.segmentLabel", { n: (shift.segments.findIndex((s) => s.id === activeSegmentId) ?? 0) + 1 })}`}
+          sessionLabel={`${SESSION_LABEL[activeSession]} · ${t("clockIn.segmentLabel", {
+            // findIndex 找不到时返回 -1（不是 null/undefined），`?? 0` 接不住 -1，
+            // 用 Math.max 兜底，避免生效班次在相机弹层打开期间发生变化时显示出 "Segment 0"
+            n: Math.max(shift.segments.findIndex((s) => s.id === activeSegmentId), 0) + 1,
+          })}`}
           onCancel={() => {
             setActiveSession(null);
             setActiveSegmentId(null);

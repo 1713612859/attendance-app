@@ -13,7 +13,7 @@ import type {
 } from "../types";
 import { delay, loadList, loadValue, saveList, saveValue, uid } from "./storage";
 import { addMonths, monthStr, pad, toDateStr } from "./date";
-import { DEFAULT_SHIFT, calculateChargeableLeaveDays } from "../domain/attendance/attendanceCalculator";
+import { DEFAULT_SHIFT, buildSegmentFromRange, calculateChargeableLeaveDays } from "../domain/attendance/attendanceCalculator";
 
 const KEYS = {
   clock: "clockRecords",
@@ -22,11 +22,11 @@ const KEYS = {
   profile: "profile",
   shifts: "shifts",
   shiftAssignments: "shiftAssignments",
-  // v4：Shift 从 { startTime, endTime } 改成多段 { segments }，旧版本种子数据形状不兼容，
-  // 版本号必须变化才能让下面的 seedIfNeeded() 重新播种，而不是复用不匹配新代码的旧数据。
-  // （见 BUSINESS_LOGIC_REVIEW.md 中"localStorage 需要版本管理"一项——这里是最小实现：
-  // 直接靠 bump 版本号触发整体重新播种，还没做到按字段迁移旧数据。）
-  seeded: "seeded_v4",
+  // v5：ShiftChangeApply 的 currentStart/currentEnd/requestedStart/requestedEnd 改成了
+  // currentSegments/requestedSegments 数组（支持多段班次调整），CorrectionApply 加了 segmentId。
+  // 同 v4 一样，靠 bump 版本号触发整体重新播种，见 BUSINESS_LOGIC_REVIEW.md 的
+  // "localStorage 需要版本管理"一项——仍然是最小实现，还没做到按字段迁移旧数据。
+  seeded: "seeded_v5",
 };
 
 export const PROFILE: EmployeeProfile = {
@@ -234,6 +234,21 @@ export async function submitClock(
 ): Promise<ClockRecord> {
   await delay(500);
   const list = loadList<ClockRecord>(KEYS.clock);
+
+  // 防抖：同一员工同一天同一 session，如果最近 5 秒内已经有一条几乎同一时刻的有效记录，
+  // 视为重复提交（比如手指抖了连点两下、或网络卡顿后用户又点了一次），直接把已存在的那条返回，
+  // 不再新增。注意这不是"一天只能打一次卡"的硬限制——多段班次下同一天同一 session 打好几次
+  // 本来就是合法业务（上午一次上班卡、下午再一次），这里只挡"几乎同一时刻"的重复。
+  const nearDuplicate = list.find(
+    (r) =>
+      r.employeeId === PROFILE.employeeId &&
+      r.attendanceDate === input.date &&
+      r.session === input.session &&
+      r.status === "valid" &&
+      Math.abs(new Date(r.clockTime).getTime() - new Date(input.clockTime).getTime()) < 5000
+  );
+  if (nearDuplicate) return nearDuplicate;
+
   // 考勤归属日：默认与打卡自然日一致；夜班（跨夜班次）的下班打卡应归属"上班当天"，
   // 此处按 in/out 均使用 input.date（调用方已按班次判断传入）作为归属日，避免直接用 clockTime 的自然日。
   const record: ClockRecord = {
@@ -302,9 +317,12 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
       // 已存在正常打卡，不重复生成，仅在审批意见中记录冲突，供 HR 人工复核
       comment = "Approved, but a normal clock record already exists for this date/session — no duplicate record was created.";
     } else if (!existing) {
-      // 补卡时间取该员工当天生效班次的第一段应出勤时间，而不是写死 09:00/18:00
+      // 补卡时间取"申请时指定的那一段"的应出勤时间，而不是永远用第一段——
+      // 班次含多段时，员工申请补的可能是第 2 段甚至更后面的段，写死 segments[0]
+      // 会把回填时间和窗口匹配都算到错误的段上（比如漏打下午班下班卡，却把上午班的下班时间补上去）。
+      // item.segmentId 找不到匹配段时（比如单段班次没传，或班次后来变了）才退回第 1 段兜底。
       const shift = getEffectiveShiftSync(item.employeeId, item.date);
-      const seg = shift.segments[0];
+      const seg = shift.segments.find((s) => s.id === item.segmentId) ?? shift.segments[0];
       const time = item.session === "in" ? seg.startTime : seg.endTime;
       const clock = loadList<ClockRecord>(KEYS.clock);
       clock.push({
@@ -330,27 +348,14 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
     const assignments = loadList<EmployeeShiftAssignment>(KEYS.shiftAssignments);
     const shifts = loadList<Shift>(KEYS.shifts);
     const shiftId = `shift-${item.id}`;
-    const crossesMidnight = toMinutesLocal(item.requestedEnd) <= toMinutesLocal(item.requestedStart);
-    // 打卡窗口：提前 2 小时可打上班卡，下班后延后 4 小时（或跨夜到次日）可补打下班卡——
-    // 经验默认值，与新增班次一致，非法定标准，正式系统应由企业配置。
-    const clockInWindowStart = shiftTimeBy(item.requestedStart, -120).time;
-    const outWindow = shiftTimeBy(item.requestedEnd, 240);
+    // requestedSegments 支持多段——申请调整为分段班次（比如上午/下午）现在能通过审批真正生效，
+    // 不再只能生成单段 Shift。窗口计算统一走 buildSegmentFromRange，与种子班次用同一套规则，
+    // 也顺带修掉了之前"提前窗口跨到前一天导致窗口整个打不开"的 bug（见该函数注释）。
     shifts.push({
       id: shiftId,
       name: "Adjusted Shift",
       graceMinutes: 5,
-      segments: [
-        {
-          id: "seg-1",
-          startTime: item.requestedStart,
-          endTime: item.requestedEnd,
-          clockInRequired: true,
-          clockInWindowStart,
-          clockOutRequired: true,
-          clockOutWindowEnd: outWindow.time,
-          clockOutWindowCrossesMidnight: crossesMidnight || outWindow.crossedMidnight,
-        },
-      ],
+      segments: item.requestedSegments.map((r, i) => buildSegmentFromRange(`${shiftId}-seg-${i}`, r.startTime, r.endTime)),
     });
     saveList(KEYS.shifts, shifts);
     assignments.push({
@@ -374,19 +379,6 @@ export async function demoDecide(id: string, decision: "approved" | "rejected"):
   saveList(KEYS.applies, list);
 }
 
-function toMinutesLocal(time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
-}
-
-function shiftTimeBy(time: string, deltaMinutes: number): { time: string; crossedMidnight: boolean } {
-  const total = toMinutesLocal(time) + deltaMinutes;
-  const crossedMidnight = total >= 1440 || total < 0;
-  const norm = ((total % 1440) + 1440) % 1440;
-  const h = Math.floor(norm / 60);
-  const m = norm % 60;
-  return { time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, crossedMidnight };
-}
 
 export function countByKind(list: ApplyRecord[], kind: ApplyKind): ApplyRecord[] {
   return list.filter((a) => a.kind === kind);

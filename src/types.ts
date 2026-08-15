@@ -47,6 +47,10 @@ export interface CorrectionApply extends ApplyBase {
   kind: "correction";
   date: string;
   session: ClockSession;
+  // 班次含多段时间时，必须指明补的是哪一段——不指明就没法知道该按哪一段的应出勤时间回填，
+  // 审批通过后也没法把生成的打卡记录正确匹配回目标段（而不是被窗口匹配逻辑配到别的段去）。
+  // 单段班次下可以为空，审批时退回第 1 段。
+  segmentId?: string;
   reason: string;
   attachmentDataUrl?: string;
 }
@@ -94,13 +98,19 @@ export interface OvertimeApply extends ApplyBase {
   reason: string;
 }
 
+export interface ShiftTimeRange {
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+}
+
 export interface ShiftChangeApply extends ApplyBase {
   kind: "shift";
   effectiveDate: string; // YYYY-MM-DD，新班次生效日期（含当天）
-  currentStart: string; // HH:mm，结构化时间，供考勤记录模块联动迟到/早退判定
-  currentEnd: string;
-  requestedStart: string;
-  requestedEnd: string;
+  // 数组而不是单个 start/end——班次本身已经支持多段（见 Shift.segments），
+  // 申请调整的目标理应能同样表达多段，否则员工永远没法通过申请流程换成分段班次，
+  // 多段班次就只能停留在写死的种子数据里。currentSegments 只是提交当下"生效班次"的快照，仅展示用。
+  currentSegments: ShiftTimeRange[];
+  requestedSegments: ShiftTimeRange[];
   reason: string;
 }
 

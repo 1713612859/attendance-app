@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { LEAVE_TYPES } from "../types";
-import type { ApplyKind, ApplyRecord, ClockSession, LeaveType, OvertimeType } from "../types";
+import type { ApplyKind, ApplyRecord, ClockSession, LeaveType, OvertimeType, ShiftTimeRange } from "../types";
 import { uid } from "../lib/storage";
 import { diffHours, todayStr } from "../lib/date";
 import { calculateChargeableLeaveDays, getDayType } from "../domain/attendance/attendanceCalculator";
 import { useI18n, leaveTypeLabel } from "../i18n";
-import { PROFILE } from "../lib/mockApi";
+import { PROFILE, getEffectiveShiftSync } from "../lib/mockApi";
 import Sheet from "./Sheet";
 import DateField from "./DateField";
 import TimeField from "./TimeField";
 import SelectField from "./SelectField";
+import { Plus, Trash2 } from "lucide-react";
 
 interface Props {
   kind: ApplyKind;
@@ -51,8 +52,17 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
   // 补卡
   const [correctionDate, setCorrectionDate] = useState(todayStr());
   const [correctionSession, setCorrectionSession] = useState<ClockSession>("in");
+  const [correctionSegmentId, setCorrectionSegmentId] = useState<string | undefined>();
   const [correctionReason, setCorrectionReason] = useState("");
   const [correctionFile, setCorrectionFile] = useState<string | undefined>();
+  // 补卡日期对应的生效班次——班次含多段时，必须让员工选清楚补的是哪一段，
+  // 不然审批时没法知道该按哪一段的应出勤时间回填（见 mockApi.ts demoDecide 的 P0 修复说明）
+  const correctionShift = useMemo(() => getEffectiveShiftSync(PROFILE.employeeId, correctionDate), [correctionDate]);
+  // 用户还没手动选过、或者换了日期导致之前选的段不再存在时，默认选第 1 段
+  const effectiveCorrectionSegmentId =
+    correctionSegmentId && correctionShift.segments.some((s) => s.id === correctionSegmentId)
+      ? correctionSegmentId
+      : correctionShift.segments[0]?.id;
 
   // 请假（拆分日期/时间两个字段，比原生 datetime-local 更贴合移动端交互习惯）
   const [leaveType, setLeaveType] = useState<LeaveType>(LEAVE_TYPES[0]);
@@ -79,12 +89,22 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
   };
 
   // 班次调整（结构化时间，便于考勤记录模块按生效日期联动迟到/早退判定）
+  // 支持多段——申请调整为分段班次（比如上午/下午）需要能表达多组时间，不再只有一组 start/end
   const [shiftDate, setShiftDate] = useState(todayStr());
-  const [currentStart, setCurrentStart] = useState("09:00");
-  const [currentEnd, setCurrentEnd] = useState("18:00");
-  const [requestedStart, setRequestedStart] = useState("13:00");
-  const [requestedEnd, setRequestedEnd] = useState("22:00");
+  const [requestedSegments, setRequestedSegments] = useState<ShiftTimeRange[]>([{ startTime: "13:00", endTime: "22:00" }]);
   const [shiftReason, setShiftReason] = useState("");
+  // 当前生效班次快照——只读展示，让员工看清楚"现在是什么班次"，不作为提交字段
+  const currentShiftSnapshot = useMemo(() => getEffectiveShiftSync(PROFILE.employeeId, shiftDate), [shiftDate]);
+
+  function updateSegment(i: number, patch: Partial<ShiftTimeRange>) {
+    setRequestedSegments((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  }
+  function addSegment() {
+    setRequestedSegments((prev) => [...prev, { startTime: "13:00", endTime: "18:00" }]);
+  }
+  function removeSegment(i: number) {
+    setRequestedSegments((prev) => prev.filter((_, idx) => idx !== i));
+  }
 
   // 离职
   const [resignDate, setResignDate] = useState(todayStr());
@@ -128,7 +148,8 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
     }
     if (kind === "shift") {
       if (!shiftReason.trim()) return setError(t("applyForm.errShiftFields"));
-      if (requestedEnd === requestedStart) return setError(t("applyForm.errShiftRange"));
+      if (requestedSegments.length === 0) return setError(t("applyForm.errShiftRange"));
+      if (requestedSegments.some((s) => s.startTime === s.endTime)) return setError(t("applyForm.errShiftRange"));
     }
     if (kind === "resignation") {
       if (!resignReason.trim()) return setError(t("applyForm.errResignReason"));
@@ -140,7 +161,15 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
     const base = { id: uid(), employeeId: PROFILE.employeeId, status: "pending" as const, submittedAt: new Date().toISOString() };
     let record: ApplyRecord;
     if (kind === "correction") {
-      record = { ...base, kind, date: correctionDate, session: correctionSession, reason: correctionReason, attachmentDataUrl: correctionFile };
+      record = {
+        ...base,
+        kind,
+        date: correctionDate,
+        session: correctionSession,
+        segmentId: effectiveCorrectionSegmentId,
+        reason: correctionReason,
+        attachmentDataUrl: correctionFile,
+      };
     } else if (kind === "leave") {
       record = {
         ...base,
@@ -168,10 +197,8 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
         ...base,
         kind,
         effectiveDate: shiftDate,
-        currentStart,
-        currentEnd,
-        requestedStart,
-        requestedEnd,
+        currentSegments: currentShiftSnapshot.segments.map((s) => ({ startTime: s.startTime, endTime: s.endTime })),
+        requestedSegments,
         reason: shiftReason,
       };
     } else {
@@ -212,6 +239,24 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
                 ))}
               </div>
             </Field>
+            {correctionShift.segments.length > 1 && (
+              <Field label={t("applyForm.correctionSegment")} required>
+                <div className="flex flex-wrap gap-2">
+                  {correctionShift.segments.map((seg, i) => (
+                    <button
+                      type="button"
+                      key={seg.id}
+                      onClick={() => setCorrectionSegmentId(seg.id)}
+                      className={`rounded-xl border px-3 py-2 text-xs ${
+                        effectiveCorrectionSegmentId === seg.id ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500"
+                      }`}
+                    >
+                      {t("clockIn.segmentLabel", { n: i + 1 })} {seg.startTime}–{seg.endTime}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            )}
             <Field label={t("applyForm.correctionReason")} required>
               <textarea
                 value={correctionReason}
@@ -302,16 +347,47 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
             <Field label={t("applyForm.shiftDate")} required>
               <DateField value={shiftDate} onChange={setShiftDate} min={todayStr()} />
             </Field>
-            <Field label={t("applyForm.shiftCurrent")} required>
-              <div className="grid grid-cols-2 gap-3">
-                <TimeField value={currentStart} onChange={setCurrentStart} />
-                <TimeField value={currentEnd} onChange={setCurrentEnd} />
+            <Field label={t("applyForm.shiftCurrent")}>
+              <div className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-600">
+                {currentShiftSnapshot.segments.map((s, i) => (
+                  <div key={s.id} className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400">{t("clockIn.segmentLabel", { n: i + 1 })}</span>
+                    <span>
+                      {s.startTime}–{s.endTime}
+                    </span>
+                  </div>
+                ))}
               </div>
             </Field>
             <Field label={t("applyForm.shiftRequested")} required>
-              <div className="grid grid-cols-2 gap-3">
-                <TimeField value={requestedStart} onChange={setRequestedStart} />
-                <TimeField value={requestedEnd} onChange={setRequestedEnd} />
+              <div className="space-y-3">
+                {requestedSegments.map((seg, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-16 shrink-0 text-xs text-slate-400">{t("clockIn.segmentLabel", { n: i + 1 })}</span>
+                    <div className="grid flex-1 grid-cols-2 gap-2">
+                      <TimeField value={seg.startTime} onChange={(v) => updateSegment(i, { startTime: v })} />
+                      <TimeField value={seg.endTime} onChange={(v) => updateSegment(i, { endTime: v })} />
+                    </div>
+                    {requestedSegments.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeSegment(i)}
+                        aria-label={t("applyForm.shiftRemoveSegment")}
+                        className="shrink-0 rounded-full p-1.5 text-slate-400 active:bg-slate-100"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addSegment}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-200 py-2 text-xs font-medium text-slate-500 active:bg-slate-50"
+                >
+                  <Plus size={14} />
+                  {t("applyForm.shiftAddSegment")}
+                </button>
               </div>
               <p className="mt-1 text-[11px] text-slate-400">{t("applyForm.shiftStructuredHint")}</p>
             </Field>

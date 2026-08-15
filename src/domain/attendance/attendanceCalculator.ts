@@ -228,3 +228,40 @@ export function calculateChargeableLeaveDays(startISO: string, endISO: string): 
 export function otherSession(session: ClockSession): ClockSession {
   return session === "in" ? "out" : "in";
 }
+
+/** 把 HH:mm 时间平移 deltaMinutes 分钟，返回平移后的 HH:mm 和"是否跨到了另一天"。
+ *  之前 mockApi.ts 里有一份几乎一样的 shiftTimeBy/toMinutesLocal，属于重复实现，统一收到这里。 */
+export function shiftTimeByMinutes(time: string, deltaMinutes: number): { time: string; crossedMidnight: boolean } {
+  const total = toMinutes(time) + deltaMinutes;
+  const crossedMidnight = total >= 1440 || total < 0;
+  const norm = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(norm / 60);
+  const m = norm % 60;
+  return { time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, crossedMidnight };
+}
+
+/**
+ * 由"应出勤开始/结束时间"生成一条完整 ShiftSegment：打卡窗口默认提前 2 小时开放上班卡、
+ * 下班后延后 4 小时仍可补下班卡（企业可配置的经验值，这里只是合理默认）。
+ *
+ * 提前窗口如果算出来会跨到前一天（比如应出勤 01:00，提前 2 小时变成前一天 23:00），
+ * 这里收敛到当天 00:00，不做真正的"跨天到前一天"窗口——isNowInSegmentWindow 只按
+ * "当天分钟数"判断，没有日期上下文，勉强支持反向跨天只会更容易出错。收敛到 00:00
+ * 至少保证窗口不是空的（此前的 bug：不做收敛时，窗口区间会变成 [1380, 840] 这种
+ * start>end 的空区间，导致整个提前打卡窗口完全打不开）。
+ */
+export function buildSegmentFromRange(id: string, startTime: string, endTime: string): ShiftSegment {
+  const crossesMidnight = toMinutes(endTime) <= toMinutes(startTime);
+  const inRaw = shiftTimeByMinutes(startTime, -120);
+  const outRaw = shiftTimeByMinutes(endTime, 240);
+  return {
+    id,
+    startTime,
+    endTime,
+    clockInRequired: true,
+    clockInWindowStart: inRaw.crossedMidnight ? "00:00" : inRaw.time,
+    clockOutRequired: true,
+    clockOutWindowEnd: outRaw.time,
+    clockOutWindowCrossesMidnight: crossesMidnight || outRaw.crossedMidnight,
+  };
+}

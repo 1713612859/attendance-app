@@ -40,7 +40,7 @@ export default function ApplyKindPage() {
     if (r.kind === "correction") return `${r.date} · ${r.session === "in" ? t("applyForm.sessionIn") : t("applyForm.sessionOut")}`;
     if (r.kind === "leave") return `${leaveTypeLabel(lang, r.leaveType)} · ${t("applyDetail.daysUnit", { n: r.days })}`;
     if (r.kind === "overtime") return `${r.date} · ${r.hours}h`;
-    if (r.kind === "shift") return `${r.effectiveDate} · ${r.requestedStart}-${r.requestedEnd}`;
+    if (r.kind === "shift") return `${r.effectiveDate} · ${r.requestedSegments.map((s) => `${s.startTime}-${s.endTime}`).join(", ")}`;
     return `${t("applyDetail.resignDate")} ${r.lastWorkingDate}`;
   }
 
