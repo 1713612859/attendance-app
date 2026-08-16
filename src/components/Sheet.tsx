@@ -16,7 +16,13 @@ interface Props {
 export default function Sheet({ title, onClose, children }: Props) {
   const { t } = useI18n();
   return (
-    <Drawer.Root open onOpenChange={(open) => !open && onClose()} shouldScaleBackground={false}>
+    // modal={false}：vaul 的 Drawer 默认是"模态"的（继承自 Radix Dialog），打开时会给 body 之外
+    // 所有内容加 pointer-events:none 来强制单一交互焦点。问题是表单里的日期/时间选择器
+    // （antd-mobile 的 DatePicker/TimePicker/Picker）各自用自己的 Portal 挂到 document.body，
+    // 不是 Drawer.Content 的子节点，一样会被这个锁挡住——表现就是选择器能看见、但点哪里都没反应，
+    // Cancel/Confirm 也点不动。关掉 modal 后交由我们自己的 Overlay 负责点击外部关闭，
+    // 不再全局锁 pointer-events，两层弹层才能都正常交互。
+    <Drawer.Root open onOpenChange={(open) => !open && onClose()} shouldScaleBackground={false} modal={false}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[1px]" />
         <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 mx-auto flex max-h-[94vh] w-full max-w-md flex-col rounded-t-[28px] bg-white shadow-2xl outline-none safe-bottom">

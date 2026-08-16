@@ -11,6 +11,7 @@ import Sheet from "./Sheet";
 import DateField from "./DateField";
 import TimeField from "./TimeField";
 import SelectField from "./SelectField";
+import FileField from "./FileField";
 import { Plus, Trash2 } from "lucide-react";
 
 interface Props {
@@ -25,14 +26,6 @@ function minDate(daysAgo: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 // 系统按日期自动识别加班类型（工作日/休息日/特殊非工作日/法定节假日），
 // 不再让员工手动选——避免选择值和实际日期类型不一致
@@ -55,6 +48,7 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
   const [correctionSegmentId, setCorrectionSegmentId] = useState<string | undefined>();
   const [correctionReason, setCorrectionReason] = useState("");
   const [correctionFile, setCorrectionFile] = useState<string | undefined>();
+  const [correctionFileName, setCorrectionFileName] = useState<string | undefined>();
   // 补卡日期对应的生效班次——班次含多段时，必须让员工选清楚补的是哪一段，
   // 不然审批时没法知道该按哪一段的应出勤时间回填（见 mockApi.ts demoDecide 的 P0 修复说明）
   const correctionShift = useMemo(() => getEffectiveShiftSync(PROFILE.employeeId, correctionDate), [correctionDate]);
@@ -72,6 +66,7 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
   const [leaveEndTime, setLeaveEndTime] = useState("18:00");
   const [leaveReason, setLeaveReason] = useState("");
   const [leaveFile, setLeaveFile] = useState<string | undefined>();
+  const [leaveFileName, setLeaveFileName] = useState<string | undefined>();
   const leaveStart = `${leaveStartDate}T${leaveStartTime}`;
   const leaveEnd = `${leaveEndDate}T${leaveEndTime}`;
 
@@ -121,11 +116,6 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
     resignation: t("applyForm.titleResignation"),
   };
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setter(await fileToDataUrl(file));
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -269,7 +259,13 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
               <p className="mt-1 text-right text-[11px] text-slate-300">{correctionReason.length}/200</p>
             </Field>
             <Field label={`${t("applyForm.attachment")}${t("common.optional")}`}>
-              <input type="file" accept="image/*" onChange={(e) => handleFile(e, setCorrectionFile)} className="text-xs" />
+              <FileField
+                fileName={correctionFileName}
+                onChange={(dataUrl, name) => {
+                  setCorrectionFile(dataUrl);
+                  setCorrectionFileName(name);
+                }}
+              />
             </Field>
           </>
         )}
@@ -305,7 +301,13 @@ export default function ApplyForm({ kind, onClose, onSubmit }: Props) {
               label={`${t("applyForm.leaveAttachment")}${needsAttachment ? t("applyForm.leaveAttachmentRequired") : t("common.optional")}`}
               required={needsAttachment}
             >
-              <input type="file" accept="image/*" onChange={(e) => handleFile(e, setLeaveFile)} className="text-xs" />
+              <FileField
+                fileName={leaveFileName}
+                onChange={(dataUrl, name) => {
+                  setLeaveFile(dataUrl);
+                  setLeaveFileName(name);
+                }}
+              />
             </Field>
           </>
         )}

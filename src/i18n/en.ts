@@ -8,6 +8,8 @@ const en = {
     close: "Close",
     optional: "(optional)",
     required: "(required)",
+    chooseFile: "Choose File",
+    noFileChosen: "No file chosen",
   },
   nav: {
     clock: "Clock In",
@@ -32,7 +34,6 @@ const en = {
     loginMethod: "Login method",
     loginMethodValue: "Local login (not connected to a real account system)",
     loginTime: "Signed in at",
-    privacyNote: "All data on this page is stored locally on this device. A production build would integrate with the company's account system (SSO / OTP, etc.).",
     logout: "Log Out",
     logoutConfirmBody: "Are you sure you want to log out? You'll need to sign in again to use clock-in and other features.",
     logoutCancel: "Cancel",

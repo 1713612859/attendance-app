@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, RotateCcw, ShieldCheck, User } from "lucide-react";
+import { LogOut, RotateCcw, User } from "lucide-react";
 import { PROFILE, resetLocalData } from "../lib/mockApi";
 import { getSession, logout } from "../lib/auth";
 import { useI18n, payCycleLabel, genderLabel } from "../i18n";
@@ -74,11 +74,6 @@ export default function Profile() {
         <Row label={t("profile.loginTime")} value={session ? new Date(session.loggedInAt).toLocaleString() : "-"} />
       </section>
 
-      <section className="mt-4 flex items-start gap-2 rounded-2xl bg-slate-50 p-3 text-xs text-slate-400">
-        <ShieldCheck size={16} className="mt-0.5 shrink-0" />
-        {t("profile.privacyNote")}
-      </section>
-
       <button
         onClick={() => setResetConfirmOpen(true)}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 py-3 text-sm font-medium text-slate-500 active:bg-slate-50"
@@ -89,7 +84,7 @@ export default function Profile() {
 
       <button
         onClick={() => setConfirmOpen(true)}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 py-3 text-sm font-medium text-rose-600 active:bg-rose-50"
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 py-3 text-sm font-medium text-white active:bg-rose-700"
       >
         <LogOut size={16} />
         {t("profile.logout")}

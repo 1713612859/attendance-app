@@ -5,13 +5,16 @@ html, body, #root {
   height: 100%;
 }
 
-/* antd-mobile 主题变量对齐品牌绿，避免默认蓝色和我们的视觉体系打架 */
+/* antd-mobile 主题变量对齐品牌绿，避免默认蓝色和我们的视觉体系打架。
+   加 !important 是因为 antd-mobile 自己的 theme-default.css 也在 :root 上声明了
+   --adm-color-primary: #1677ff（蓝），打包后两条规则谁在后面谁赢，不能保证我们这条一定排在后面——
+   Picker/DatePicker 的 Cancel/Confirm 按钮走的正是这个变量，之前显示蓝色就是被它盖过去了。 */
 :root {
-  --adm-color-primary: #16a34a;
-  --adm-color-success: #16a34a;
-  --adm-color-text: #1a2e22;
-  --adm-color-weak: #5f6e63;
-  --adm-color-border: #e2e8f0;
+  --adm-color-primary: #16a34a !important;
+  --adm-color-success: #16a34a !important;
+  --adm-color-text: #1a2e22 !important;
+  --adm-color-weak: #5f6e63 !important;
+  --adm-color-border: #e2e8f0 !important;
   --adm-font-size-main: 15px;
 }
 
@@ -20,6 +23,24 @@ body {
   overscroll-behavior-y: none;
   background: #f4f6f5;
   color: #1a2e22;
+}
+
+/* 两层弹层（antd-mobile Picker/Popup + 我们自己的 Sheet）叠加时，某个库打开时把 body
+   锁成 pointer-events:none 用来屏蔽背景交互，但两层嵌套下这个锁有时候没解开，导致所有东西
+   （包括弹层自己的按钮）都点不动。背景点击关闭我们已经用自己的 Overlay 处理了，不需要这套全局锁，
+   直接强制 body 保持可交互，从根上避免"锁上了忘记解开"这类问题。 */
+body {
+  pointer-events: auto !important;
+}
+
+/* 真正卡住 Cancel/Confirm 点不动的是这一层：antd-mobile 的 Popup 用 react-spring 给
+   .adm-popup-body 的内联样式动态设置 pointer-events（跟随打开/拖拽关闭的动画进度），
+   在我们的 Sheet 套 Sheet（Vaul Drawer 里再弹一个 antd-mobile Picker）场景下，
+   这个动画状态没能正确回到"可交互"，内联样式就一直卡在 none。CSS 的 !important
+   声明可以盖过普通的内联样式（非 !important 的内联样式优先级低于 !important 的样式表规则），
+   所以这里能强制覆盖掉动画写进去的 pointer-events:none。 */
+.adm-popup-body {
+  pointer-events: auto !important;
 }
 
 .safe-top {

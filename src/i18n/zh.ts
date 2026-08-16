@@ -8,6 +8,8 @@ const zh = {
     close: "关闭",
     optional: "（可选）",
     required: "（必填）",
+    chooseFile: "选择文件",
+    noFileChosen: "未选择任何文件",
   },
   nav: {
     clock: "打卡",
@@ -32,7 +34,6 @@ const zh = {
     loginMethod: "登录方式",
     loginMethodValue: "本地登录（非真实账号体系）",
     loginTime: "登录时间",
-    privacyNote: "本页所有数据保存在当前设备浏览器本地；正式版本需接入企业账号体系（SSO / 短信验证码等）。",
     logout: "退出登录",
     logoutConfirmBody: "确认退出登录吗？退出后需重新登录才能使用打卡等功能。",
     logoutCancel: "取消",
