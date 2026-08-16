@@ -32,7 +32,7 @@ const zh = {
   profile: {
     title: "我的",
     loginMethod: "登录方式",
-    loginMethodValue: "本地登录（非真实账号体系）",
+    loginMethodValue: "本地登录",
     loginTime: "登录时间",
     logout: "退出登录",
     logoutConfirmBody: "确认退出登录吗？退出后需重新登录才能使用打卡等功能。",
