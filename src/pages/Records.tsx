@@ -13,15 +13,15 @@ import PhotoPreview from "../components/PhotoPreview";
 //
 // 底色（4 色，覆盖当天最主要的状态）：
 //   绿色（brand）  正常出勤 / 今天
-//   粉红（rose）   异常——迟到 / 早退 / 缺卡，三者共用同一个底色
+//   粉红（rose）   异常——迟到 / 早退 / 缺卡，三者共用同一个底色，不再细分
 //   蓝色（sky）    请假
 //   靛蓝（indigo） 法定节假日
 //
-// 角标小圆点（叠加在底色右上角，用来在"异常"这个大类里进一步区分具体是哪一种）：
-//   琥珀色点（amber）  迟到
-//   橙色点（orange）   早退
-//   紫色点（violet）   加班（可以和上面任意一种底色叠加出现，不局限于"异常"）
-//   缺卡不带点——当天没有任何打卡记录，没有时间可用来判断迟到/早退，只靠粉色底色本身表示
+// 角标小圆点：只保留紫色（violet）一种，表示当天有加班，可以和上面任意一种底色叠加出现。
+// 迟到/早退曾经各用一个小圆点细分（琥珀色/橙色），已去掉——多段班次下，"最早上班卡/最晚下班卡"
+// 定位圆点归属的旧逻辑会把点标到错误的段上（比如上午段准时、下午段迟到，圆点却标在上午段的记录旁边），
+// 与其展示一个可能定位错误的细分标记，不如统一只用底色表示"异常"，具体是哪一种、哪一段，
+// 点开当天详情看文字标签。
 //
 // 点开某一天的详情面板可以看到精确的文字标签，颜色/圆点只负责"一眼扫过去要不要注意"这一层。
 const CELL_STYLE: Record<string, string> = {
@@ -167,10 +167,9 @@ export default function Records() {
             const cls = result ? primaryCellClass(result) : "text-slate-300";
             const notAbsent = !result?.tags.includes("absent");
             const showOvertimeDot = result?.tags.includes("overtime") && notAbsent;
-            // 背景统一是"异常"色后，用角标小圆点区分具体是迟到还是早退（缺勤没有打卡记录，
-            // 不会跟迟到/早退同时出现，靠底色本身就够了，不用再叠一个点）
-            const showLateDot = result?.tags.includes("late") && notAbsent;
-            const showEarlyLeaveDot = result?.tags.includes("early-leave") && notAbsent;
+            // 迟到/早退不再各用一个小圆点细分——粉色底色本身就代表"异常"，具体是迟到还是早退、
+            // 又是哪一段出的问题，点开当天详情看文字标签，不在日历格子这一层做区分
+            // （之前按"最早上班卡/最晚下班卡"给圆点定位，多段班次下会把点标到错的段上，见相关记录）
             return (
               <button
                 key={dateStr}
@@ -185,8 +184,6 @@ export default function Records() {
               >
                 <span>{Number(dateStr.slice(-2))}</span>
                 <span className="absolute right-1 top-1 flex gap-0.5">
-                  {showLateDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-amber-500"}`} />}
-                  {showEarlyLeaveDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-orange-500"}`} />}
                   {showOvertimeDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-violet-500"}`} />}
                 </span>
               </button>
