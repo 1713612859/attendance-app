@@ -72,7 +72,7 @@ EmployeeProfile           employeeId/name/department/gender/avatarDataUrl/phoneN
 | 绿色（brand） | 正常出勤 / 今天 |
 | 粉红（rose） | 异常——迟到 / 早退 / 缺卡三者共用同一个底色 |
 | 蓝色（sky） | 请假 |
-| 靛蓝（indigo） | 法定节假日 |
+| 灰色（slate） | 没排班——法定节假日 + 排班休息日统一算，两者本质都是"这天不用出勤"，不再用靛蓝单独区分节假日 |
 
 | 角标小圆点 | 含义 |
 |---|---|

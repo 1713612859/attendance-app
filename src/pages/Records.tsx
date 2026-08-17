@@ -15,7 +15,8 @@ import PhotoPreview from "../components/PhotoPreview";
 //   绿色（brand）  正常出勤 / 今天
 //   粉红（rose）   异常——迟到 / 早退 / 缺卡，三者共用同一个底色，不再细分
 //   蓝色（sky）    请假
-//   靛蓝（indigo） 法定节假日
+//   灰色（slate）  没排班——法定节假日 + 排班休息日统一算，两者本质都是"这天不用出勤"，
+//                  不用再分靛蓝/无色两种视觉，灰色本身就传达"today is off"这个意思
 //
 // 角标小圆点：只保留紫色（violet）一种，表示当天有加班，可以和上面任意一种底色叠加出现。
 // 迟到/早退曾经各用一个小圆点细分（琥珀色/橙色），已去掉——多段班次下，"最早上班卡/最晚下班卡"
@@ -23,11 +24,12 @@ import PhotoPreview from "../components/PhotoPreview";
 // 与其展示一个可能定位错误的细分标记，不如统一只用底色表示"异常"，具体是哪一种、哪一段，
 // 点开当天详情看文字标签。
 //
-// 点开某一天的详情面板可以看到精确的文字标签，颜色/圆点只负责"一眼扫过去要不要注意"这一层。
+// 点开某一天的详情面板可以看到精确的文字标签，颜色/圆点只负责"一眼扫过去要不要注意"这一层；
+// 节假日具体叫什么名字（比如 Christmas Day）也只在详情面板里看，日历格子本身不区分。
 const CELL_STYLE: Record<string, string> = {
   abnormal: "bg-rose-100 text-rose-700",
   "on-leave": "bg-sky-100 text-sky-700",
-  holiday: "bg-indigo-100 text-indigo-700",
+  offDuty: "bg-slate-100 text-slate-500",
   normal: "bg-brand-50 text-brand-700",
   none: "text-slate-600",
 };
@@ -35,7 +37,9 @@ const CELL_STYLE: Record<string, string> = {
 function primaryCellClass(result: DailyAttendanceResult): string {
   if (result.tags.includes("absent") || result.tags.includes("late") || result.tags.includes("early-leave")) return CELL_STYLE.abnormal;
   if (result.tags.includes("on-leave")) return CELL_STYLE["on-leave"];
-  if (result.tags.includes("holiday")) return CELL_STYLE.holiday;
+  if (result.dayType === "regular-holiday" || result.dayType === "special-non-working-holiday" || result.dayType === "rest-day") {
+    return CELL_STYLE.offDuty;
+  }
   if (result.tags.includes("normal")) return CELL_STYLE.normal;
   return CELL_STYLE.none;
 }
