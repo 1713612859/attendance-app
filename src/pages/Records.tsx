@@ -17,14 +17,9 @@ import PhotoPreview from "../components/PhotoPreview";
 //   粉红（rose）   异常——迟到 / 早退 / 缺卡，三者共用同一个底色，不再细分
 //   灰色（slate）  没排班——法定节假日 + 排班休息日统一算，两者本质都是"这天不用出勤"
 //
-// 角标小圆点：只保留紫色（violet）一种，表示当天有加班，可以和上面任意一种底色叠加出现。
-// 迟到/早退曾经各用一个小圆点细分（琥珀色/橙色），已去掉——多段班次下，"最早上班卡/最晚下班卡"
-// 定位圆点归属的旧逻辑会把点标到错误的段上（比如上午段准时、下午段迟到，圆点却标在上午段的记录旁边），
-// 与其展示一个可能定位错误的细分标记，不如统一只用底色表示"异常"，具体是哪一种、哪一段，
-// 点开当天详情看文字标签。
-//
-// 点开某一天的详情面板可以看到精确的文字标签，颜色/圆点只负责"一眼扫过去要不要注意"这一层；
-// 请假类型、节假日具体叫什么名字（比如 Christmas Day）也只在详情面板里看，日历格子本身不区分。
+// 角标小圆点（迟到/早退/加班）全部去掉了，日历格子不再叠加任何圆点，只用底色表示"要不要注意"。
+// 点开某一天的详情面板可以看到精确的文字标签（迟到/早退/加班/请假类型/节假日名称），
+// 日历格子本身不做这一层区分。
 const CELL_STYLE: Record<string, string> = {
   abnormal: "bg-rose-100 text-rose-700",
   offDuty: "bg-slate-100 text-slate-500",
@@ -166,11 +161,8 @@ export default function Records() {
             const isSelected = dateStr === selected;
             const isToday = dateStr === todayStr();
             const cls = result ? primaryCellClass(result) : "text-slate-300";
-            const notAbsent = !result?.tags.includes("absent");
-            const showOvertimeDot = result?.tags.includes("overtime") && notAbsent;
-            // 迟到/早退不再各用一个小圆点细分——粉色底色本身就代表"异常"，具体是迟到还是早退、
-            // 又是哪一段出的问题，点开当天详情看文字标签，不在日历格子这一层做区分
-            // （之前按"最早上班卡/最晚下班卡"给圆点定位，多段班次下会把点标到错的段上，见相关记录）
+            // 角标小圆点（迟到/早退/加班）已经全部去掉了，日历格子这一层只用底色表示"要不要注意"，
+            // 具体是哪种情况、有没有加班，点开当天详情看文字标签
             return (
               <button
                 key={dateStr}
@@ -184,9 +176,6 @@ export default function Records() {
                 }`}
               >
                 <span>{Number(dateStr.slice(-2))}</span>
-                <span className="absolute right-1 top-1 flex gap-0.5">
-                  {showOvertimeDot && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-violet-500"}`} />}
-                </span>
               </button>
             );
           })}
