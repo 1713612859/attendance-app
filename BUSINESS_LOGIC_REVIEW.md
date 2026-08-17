@@ -3,6 +3,9 @@
 > 目的：本文档供交叉审查（如 Codex）使用，梳理当前 Demo 的业务规则、数据模型和已知存疑点。
 > 定位：这是一个**纯前端 + localStorage Mock 数据**的可运行原型，用于产品验证交互流程，
 > 不是生产系统。所有"业务规则"目前都是**写死在前端代码里的示例值**，未来必须由后端 / 排班系统 / HR 规则引擎驱动。
+>
+> 本版本状态：多段班次（Split Shift）模型已上线并跑通全链路（申请→审批→生效→联动考勤计算），
+> 法定节假日日历已接入缺勤/加班判定，此前"班次数据孤岛"问题已解决。仍然开放的问题见第 8、9 节。
 
 代码位置：`D:\Dev_project\attendance-app-demo`（独立仓库，与 ap-power-web 无关）
 
@@ -13,28 +16,44 @@
 - Vite + React + TypeScript + Tailwind v4，`HashRouter` 路由，纯客户端渲染
 - 无真实后端；所有数据经 `src/lib/mockApi.ts` 读写 `localStorage`，函数签名已按未来真实 API 设计（`async`、统一返回结构），便于后续替换为 `fetch`
 - 登录态：`src/lib/auth.ts`，`localStorage` 存 session，无真实鉴权、无 Token 过期机制
-- i18n：`src/i18n/`，`en`/`zh` 两套字典 + Context，默认英文；**尚未做字典 key 完整性校验**，两语言字典是否 100% 对齐未做自动化检查
+- i18n：`src/i18n/`，`en`/`zh` 两套字典 + Context，默认英文；**尚未做字典 key 完整性校验**，两语言字典是否 100% 对齐未做自动化检查。英文文案已按菲律宾本地 HR/DOLE 惯用语核对过一轮（Split Shift、DTR Correction、Applications、Ordinary Working Day 等），中文暂未做同等程度的本地化审查
+- 考勤计算集中在 `src/domain/attendance/attendanceCalculator.ts`（迟到/早退/缺勤/请假天数/班次窗口匹配），页面组件不再自己写计算公式
 - 5 个业务模块：打卡（ClockIn）、考勤记录（Records）、申请中心（Apply：补卡/请假/加班/班次调整/离职）、工资条（Payslip）、我的（Profile）
+- 本地数据 schema 有版本号（`KEYS.seeded`），结构变化时靠 bump 版本号触发整体重新播种——**仍是"全部清空重播"而不是按字段迁移**，见第 8.6 节
 
 ## 2. 数据模型现状（`src/types.ts`）
 
 ```
-ClockRecord      打卡记录：日期/时段/时间/照片/经纬度/地址/定位异常标记/来源(normal|correction)
-ApplyRecord      联合类型：CorrectionApply | LeaveApply | OvertimeApply | ShiftChangeApply | ResignationApply
-Payslip          工资条：month + cutoffStart/cutoffEnd/payDate + grossItems[] + deductionItems[]
-EmployeeProfile  仅 employeeId/name/department，无角色、无部门层级、无直属主管字段
+ClockRecord              打卡记录：employeeId/date/attendanceDate/session/clockTime/照片/经纬度/地址/
+                          定位异常标记/来源(normal|correction)/status(valid|invalidated)
+Shift / ShiftSegment      班次：一个 Shift 可以有多个 ShiftSegment（多段班次，如上午/下午）；
+                          每段独立配置"应出勤时间"（迟到/早退判定用）和"打卡窗口"
+                          （clockInWindowStart/clockOutWindowEnd，控制打卡按钮何时可点，两者是分开的概念）
+EmployeeShiftAssignment   员工-班次-生效日期 的分配记录，班次调整申请批准后在这里生成一条
+ApplyRecord               联合类型：CorrectionApply | LeaveApply | OvertimeApply | ShiftChangeApply | ResignationApply
+Payslip                   工资条：month + cutoffStart/cutoffEnd/payDate + grossItems[] + deductionItems[]
+EmployeeProfile           employeeId/name/department/gender/avatarDataUrl/phoneNumber/payCycle，
+                          全部只读展示（数据来自 HR 系统），员工端不提供自助编辑
 ```
 
 **存疑点**：
 - `ApplyBase.approver` 是自由文本字符串（如 `"Maria Santos (Supervisor)"`），没有真实的审批人/审批链数据结构，无法支撑多级审批
-- 没有 `Shift`（班次配置）实体——"迟到/早退"判定目前硬编码假设所有人朝九晚六，与新增的"班次调整申请"功能在逻辑上是脱节的（见第 4.3 节）
+- `ShiftChangeApply` 只有 `requestedSegments: ShiftTimeRange[]`（结构化开始/结束时间数组），已经能表达多段班次调整，但没有"打卡窗口"字段——审批时打卡窗口按固定经验值（提前 2 小时/延后 4 小时）自动生成，企业无法在申请层面自定义窗口宽松度
 
 ## 3. 打卡模块（ClockIn）
 
 - 拍照 → Canvas 叠加水印（姓名/工号/时间/地址）→ 存本地
-- 定位：`navigator.geolocation`，8 秒超时，失败/拒绝则标记 `locationAbnormal: true` 但**仍允许打卡**（不阻断流程）
-- 重复打卡拦截：同一天同一 session（上/下班）只能提交一次，否则弹 toast 拒绝，**没有"强制重新打卡覆盖"的选项**
-- 无相机权限时降级为占位图片，保证流程可测
+- **多段班次打卡**：一天可以有多组独立的上下班时段。系统按"现在几点"自动判断当前生效哪一段
+  （落在该段打卡窗口内即为生效段），只让对应那一段可以打卡，其他段显示"未到时间"/"窗口已过"/"已完成"
+- 打卡记录与段的匹配按**打卡时间落在哪一段的窗口内**判定（`selectDailyPunches`/`matchSegmentIndex`），
+  不是按当天第几次打卡简单顺序配对——早期版本用顺序配对，会把非工作时间的测试打卡错配到第一段，已修复
+- 定位：`navigator.geolocation`，8 秒超时，失败/拒绝则标记 `locationAbnormal: true` 但**仍允许打卡**（不阻断流程）；
+  定位相关提示文案（未获取到定位/超时/权限拒绝）已跟随语言切换，不再写死中文
+- **重复提交防抖**：`submitClock` 会检查同一员工、同一考勤归属日、同一 session 是否有"5 秒内"的近似重复记录，
+  有则直接返回已有记录、不新增。这不是旧版本"一天只能打一次卡"的硬限制——多段班次下同一天同一 session
+  合法地会打好几次卡（比如上下午各一次上班卡），防抖只挡"手抖连点"这类几乎同一时刻的重复
+- 无相机权限时降级为占位图片，保证流程可测；打卡记录的 `photoStatus` 会标记 `placeholder`，
+  Records 页面理论上应区分"真实照片"和"占位图"展示（目前 UI 未做视觉区分，见第 8.5 节）
 
 **存疑点 / 待确认**：
 - 定位异常时是否应该阻断打卡而非仅标记？目前策略是"不阻断，事后由后端复核"，需 HR/合规确认是否可接受
@@ -65,78 +84,94 @@ EmployeeProfile  仅 employeeId/name/department，无角色、无部门层级、
 点开某一天的详情面板可看到精确文字标签；颜色/圆点只负责"一眼扫过去要不要注意"这一层判断，
 不是唯一的信息来源（无障碍角度上仍建议保留详情面板这个文字兜底）。
 
-### 4.1 迟到/早退判定规则（`src/pages/Records.tsx`）
+### 4.1 迟到/早退判定规则（`src/domain/attendance/attendanceCalculator.ts`）
 
 ```
-硬编码：上班 09:00（5 分钟宽限）/ 下班 18:00
-迟到 = in 记录的小时 >= 9 且分钟 > 5
-早退 = out 记录的小时 < 18
+按员工当天生效的 Shift（可能是默认班次，也可能是班次调整申请批准后生成的新班次）逐段判定：
+迟到 = 该段的上班打卡时间 > 该段 startTime + graceMinutes（宽限分钟数）
+早退 = 该段的下班打卡时间 < 该段 endTime
+当天只要有任意一段迟到/早退，日历上就标记对应的 tag
 ```
 
-**这是本次审查中最需要 Codex 复核的一处**：
-- 所有员工共用同一套朝九晚六假设，**没有读取"班次调整申请"批准后的新班次**，也没有区分部门/岗位班次
-- 一旦批准了班次调整申请（`ShiftChangeApply`），Records 模块完全不感知，仍按默认 9-6 判迟到——**这是一个功能孤岛，两个模块之间没有打通**
-- 缺勤（absent）判定＝当天非周末、非请假、且无任何打卡记录；**没有考虑法定节假日**（菲律宾常规假日/特殊非工作日），法定假日当天没打卡不应计为缺勤
+- 已解决此前的"班次数据孤岛"问题：`getEffectiveShiftSync(employeeId, date)` 会按日期查询该员工当时生效的班次分配，
+  班次调整申请批准后生成的 `EmployeeShiftAssignment` 能被 Records/ClockIn 正确读取到，不再永远按默认班次判定
+- 缺勤（absent）判定＝当天是"工作日"类型（非休息日、非法定节假日）、非请假覆盖、且当天无任何有效打卡记录；
+  法定节假日/休息日不会被判定为缺勤（`getDayType` 读取 `src/lib/holidays.ts` 的节假日日历）
+- 排班休息日目前仍是全局固定"周六周日"（`isScheduledRestDay`），**没有按员工/部门维度做真正的排班表**，
+  这是一个集中的、单一配置点，但还不是真正的"个人化排班"
 
 ### 4.2 请假联动
 
 - 请假区间用 `startTime`~`endTime`（datetime-local）逐日展开成已批准请假日期集合，覆盖到的自然日在日历上标记为"请假"，优先级高于迟到/缺勤判定
-- **未处理半天假**：请假的开始/结束时间虽然精确到分钟，但日历只做"整天覆盖"展示，半天请假当天仍会被完整标记为"请假"，可能掩盖当天实际出勤的迟到/早退情况
+- 请假可扣减天数（`calculateChargeableLeaveDays`）已改为按"排班工作日"逐日统计，**排除区间内的休息日和法定节假日**，不再用自然日 ceil 把周末节假日也算进请假天数
+- **未处理半天假**：请假的开始/结束时间虽然精确到分钟，但日历只做"整天覆盖"展示，半天请假当天仍会被完整标记为"请假"，可能掩盖当天实际出勤的迟到/早退情况——分钟级重叠计算仍是待办
 
 ### 4.3 加班统计
 
 - 加班小时数只统计**已批准**的加班申请，按 `date` 汇总到当月
-- 与打卡记录之间没有交叉校验（例如加班申请的时间段是否与实际下班打卡时间吻合），纯粹是"申请了多少算多少"
+- 加班类型（工作日/休息日/特殊非工作日/法定节假日）现在由系统按日期**自动识别**（`dayTypeToOvertimeType`），员工在申请表单里只读展示，不再手动选，避免选择值和实际日期类型不一致
+- 与打卡记录之间仍然**没有交叉校验**（例如加班申请的时间段是否与实际下班打卡时间吻合），纯粹是"申请了多少算多少"
 
 ## 5. 申请中心（Apply）— 5 类申请
 
 | 类型 | 关键字段 | 校验规则 | 备注 |
 |---|---|---|---|
-| 补卡 Correction | date/session/reason/attachment | 仅限最近 3 天内 | "3 天"是示例值，需企业确认 |
-| 请假 Leave | leaveType(VL/SL/SIL/Maternity/Paternity/Solo Parent/Bereavement)/start/end/reason | 结束不早于开始；SL 必须附件 | 天数=自然日 ceil 差值，**非按实际排班工作日计算** |
-| 加班 Overtime | date/start/end/otType(workday/restday/special-holiday/regular-holiday)/reason | 时长不为 0 | 时长仅展示，不做倍率计算 |
-| 班次调整 Shift | effectiveDate/currentShift/requestedShift/reason | 三项均必填 | **currentShift/requestedShift 是自由文本输入**，无标准班次库可选，容易脏数据 |
-| 离职 Resignation | lastWorkingDate/reason/handoverNotes | 仅 reason 必填 | 按你的决定：**不校验 DOLE 30 天提前通知规则**，由 HR 后台处理；前端仅展示一行说明文字 |
+| 补卡 DTR Correction | date/session/segmentId/reason/attachment | 仅限最近 3 天内；班次含多段时必须选择具体是哪一段 | "3 天"是示例值，需企业确认。审批时按 `segmentId` 找到对应段的应出勤时间回填，不再写死第一段 |
+| 请假 Leave | leaveType(VL/SL/SIL/Maternity/Paternity/Solo Parent/Bereavement)/start/end/reason | 结束不早于开始；SL 必须附件 | 天数按排班工作日计算（见 4.2），非自然日 ceil |
+| 加班 Overtime | date/start/end/otType(自动识别)/reason | 时长不为 0 | 时长仅展示，不做倍率计算 |
+| 班次调整 Shift | effectiveDate/currentSegments(快照,只读)/requestedSegments(结构化数组,可加/删段)/reason | 每段开始结束时间不能相同 | 已从"自由文本单段"改为"结构化多段数组"，审批通过后真正生成对应的多段 `Shift` 并生效，不再只有种子数据里才有多段班次 |
+| 离职 Resignation | lastWorkingDate/reason/handoverNotes（英文 UI 里叫 Turnover notes） | 仅 reason 必填 | 按产品决定：**不校验 DOLE 30 天提前通知规则**，由 HR 后台处理；前端仅展示一行说明文字 |
 
-**审批全部是本地模拟**（`demoDecide`），审批人固定字符串，审批意见固定两句模板文案，仅用于演示状态机流转，**没有真实审批人身份、没有多级审批、没有审批权限校验**。
+**审批全部是本地模拟**（`demoDecide`），审批人固定字符串，审批意见固定模板文案，仅用于演示状态机流转，**没有真实审批人身份、没有多级审批、没有审批权限校验**。审批操作已做**幂等保护**（非 `pending` 状态的申请再次调用直接返回，防止连续点击生成重复联动数据）。
 
 **存疑点**：
 - 5 类申请是否都需要"撤回"功能？目前统一允许 `pending` 状态下撤回，未按类型区分（例如离职申请撤回在真实场景中通常需要更严格的流程）
-- 补卡审批通过后会自动生成一条 `ClockRecord`（`source: "correction"`），但**没有反向校验**——如果同一天同一 session 已经存在正常打卡记录，批准补卡会造成同日同 session 两条记录，Records 页目前按"取最早的 in 记录"逻辑，可能导致状态判断混乱
+- 补卡审批通过前会检查 `employeeId+attendanceDate+session` 是否已存在有效的**正常**打卡记录，存在则不重复生成、仅在审批意见里记录冲突——**已解决**此前"可能生成同日重复打卡"的问题，但检查粒度仍是"该 session 是否有正常记录"，没有细到"该段是否已经有正常记录"（多段班次下，同一 session 在不同段各有一条记录时，这个检查可能不够精确）
 
 ## 6. 工资条模块（Payslip）
 
 - 按半月结（Cutoff：1–15 / 16–月末）生成，字段：`cutoffStart/cutoffEnd/payDate` + `grossItems[]`（Basic/Bonus/OT）+ `deductionItems[]`（SSS/PhilHealth/Pag-IBIG/Withholding Tax）
 - 金额为 PHP，格式化用 `en-PH` locale
-- 查看详情前有一层"模拟指纹验证"的伪二次校验（无真实生物识别，纯 UI 演示）
+- **按产品决定，已去掉"模拟指纹验证"二次校验和页面顶部的"DEMO DATA"警示条**——点开工资条列表项即可直接看到完整明细，页面上不再有任何"这是示例数据"的视觉提示
 
-**存疑点 / 待确认**：
-- SSS/PhilHealth/Pag-IBIG/Withholding Tax 的具体费率是写死的示例数字，**不是按官方费率表算出来的**，正式上线前必须对接真实薪资系统或至少按最新官方费率表校正示例值，避免被误当作真实数据
+**存疑点 / 待确认（本节风险等级因上面这条改动而提高）**：
+- SSS/PhilHealth/Pag-IBIG/Withholding Tax 的具体费率是写死的示例数字，**不是按官方费率表算出来的**；由于页面已经没有任何"示例数据"提示，**如果这个 Demo 被转发给非技术背景的人（比如员工本人、HR、投资人）查看，存在被误当成真实工资数据的风险**，正式上线前必须对接真实薪资系统或至少按最新官方费率表校正示例值——这是产品明确要求去掉提示后的已知取舍，不是遗漏
 - 13th Month Pay（菲律宾法定，每年 12 月发放）**目前完全没有体现**，是否需要在工资条列表中单独作为一期特殊展示，需产品确认
 - 半月结的第二期 payDate 计算用了 `new Date(y, mm+1, 5)`（次月 5 号），第一期用 `min(20, lastDay)`（当月 20 号），这两个日期同样是**示例值**，非官方标准
 
 ## 7. 登录 / 我的（Auth & Profile）
 
-- 登录校验：工号 ≥4 位 + 密码 ≥6 位，**任意值都能登录成功**，无真实账号库
+- 登录校验：工号 ≥4 位 + 密码 ≥6 位，**任意值都能登录成功**，无真实账号库；登录页/我的页面已去掉所有"Demo"字样的用户可见文案
+- **我的页面已改为纯只读展示**：姓名/性别/部门/手机号/发薪周期均来自 `EmployeeProfile`（模拟 HR 数据），不再提供自助编辑入口（此前姓名/性别/头像曾经可编辑，已改掉）
+- 提供"重置本地数据"入口（居中弹框二次确认），清空所有 localStorage 数据并恢复初始种子数据，纯粹是 Demo 阶段的调试工具，正式系统不会有这个入口
 - 语言切换存在 `localStorage`，跟随全局，不跟随账号（清缓存即重置为默认英文）
 - 无"忘记密码""多设备登录管理""账号锁定"等安全机制（Demo 阶段合理，但需在正式需求中列出）
 
-## 8. 跨模块一致性问题汇总（建议 Codex 重点复核）
+## 8. 跨模块一致性问题汇总（本轮已解决 vs 仍然开放）
 
-1. **班次数据孤岛**：班次调整申请批准后，Records 的迟到/早退判定不读取新班次，两者数据模型未打通
-2. **法定假日缺失**：整个系统没有"菲律宾法定节假日/特殊非工作日"日历数据源，直接影响缺勤判定、加班分类（`regular-holiday`/`special-holiday` 选项存在但无日历校验用户选的类型是否与实际日期匹配）
-3. **半天请假 vs 整天日历标记**的精度损失
-4. **补卡通过后可能产生同日重复打卡记录**，无去重/覆盖逻辑
-5. **工资条扣款科目为示例费率**，非官方公式计算，存在被误用为真实数据的风险，需要更显著的"示例数据"标注（目前仅页面说明文字提及，无强视觉警示）
-6. **打卡时间戳用客户端时间**而非服务端时间，与 PRD 防篡改要求不符（Demo 阶段已知简化）
-7. **离职申请不做 30 天通知校验**（产品决定如此，非缺陷，仅记录以便 Codex 不要"修复"这一行为）
+**已解决**：
+1. ~~班次数据孤岛~~：班次调整申请批准后，Records/ClockIn 现在能正确读取新班次并联动迟到/早退判定
+2. ~~法定假日缺失~~：`src/lib/holidays.ts` 提供菲律宾法定节假日日历（固定节日 + 复活节相关日期算法计算），已接入缺勤判定；农历新年等阴历节日仍未列入，需官方公告后人工维护
+3. ~~补卡通过后可能产生同日重复打卡记录~~：审批前检查是否已有正常打卡记录，存在则不重复生成
+4. ~~班次调整只能是自由文本单段~~：已改为结构化多段数组，员工可以真正通过申请流程换成多段班次
+
+**仍然开放**：
+
+5. **半天请假 vs 整天日历标记**的精度损失（见 4.2）
+6. **本地数据 schema 升级是"全部清空重播"**：`mockApi.ts` 的 `KEYS.seeded` 版本号升级时，`seedIfNeeded()` 会把打卡记录、申请、工资条一起清空重播，而不是只迁移真正变了结构的那部分数据——每次数据模型改动都要 bump 一次版本号，累积下来对"演示中途改需求"不友好
+7. **`ConfirmDialog` 组件重复实现了 `Sheet` 组件已经放弃的写法**：`Sheet.tsx` 为了避免手写 portal + 遮罩的坑，改用了 `vaul` 库的 `Drawer`；后来新增的 `ConfirmDialog.tsx`（用于退出登录/重置数据的二次确认）又手写了一遍 `createPortal` + 遮罩，没有 Esc 关闭、没有焦点陷阱，两个弹层组件的交互手感不一致
+8. **打卡时间戳用客户端时间**而非服务端时间，与 PRD 防篡改要求不符（Demo 阶段已知简化）
+9. **加班申请与实际打卡记录无交叉校验**（见 4.3）
+10. **工资条示例费率的误用风险**：去掉视觉警示后风险等级提高，见第 6 节
+11. **离职申请不做 30 天通知校验**（产品决定如此，非缺陷，仅记录以便 Codex 不要"修复"这一行为）
 
 ## 9. 明确不在本轮范围内（避免 Codex 误判为缺陷）
 
 - 无后端、无真实鉴权、无真实审批链 —— 这是 Demo 阶段的既定范围，不是待修复问题
-- 工资条金额/费率为示例值 —— 已知，需产品/财务提供真实费率后替换
-- 班次调整、补卡时间窗口等"示例规则"数值 —— 已知占位，需企业规则确认后替换
+- 工资条金额/费率为示例值、且页面已无提示 —— 已知，产品明确要求去掉提示，需产品/财务提供真实费率后替换
+- 班次调整、补卡时间窗口等"示例规则"数值（提前 2 小时/延后 4 小时等）—— 已知占位，需企业规则确认后替换
+- 排班休息日固定"周六周日"，未做个人化排班 —— 已知简化，Demo 阶段的集中配置点已经建立，真正的排班表是后续工作
 
 ---
 
-**建议 Codex 输出格式**：按"跨模块一致性问题"逐条给出具体代码修改建议（文件+函数级别），如涉及数据模型变更（例如新增 `Shift` 实体、`PublicHoliday` 数据源），请一并给出 TypeScript 类型定义草案，我会基于该输出在本仓库中实施。
+**建议 Codex 输出格式**：按"跨模块一致性问题"逐条给出具体代码修改建议（文件+函数级别），如涉及数据模型变更，请一并给出 TypeScript 类型定义草案，我会基于该输出在本仓库中实施。
